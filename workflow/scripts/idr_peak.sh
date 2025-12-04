@@ -1,9 +1,17 @@
-#!/bin/bash
+#PBS -N idr.pbs
+#PBS -l nodes=1:ppn=20
+#PBS -S /bin/bash
+#PBS -j oe
+#PBS -q slst_fat
+#PBS -l walltime=60:00:00
+
 #nohup bash idr.sh > idr.log 2>&1 &
 
+source ~/.bashrc
 conda activate idr
-nPeak_dir="/home_data/home/slst/leixy2023/data/project/CTCF/20250519_peak_collect/peak"
-output_dir="/home_data/home/slst/leixy2023/data/project/CTCF/20250519_peak_collect/idr"
+
+nPeak_dir="/home_data/home/slst/leixy2023/data/project/CTCF/CR/250617_bam_collect/peak/narrowpeak_nolambda_q0.01"
+output_dir="/home_data/home/slst/leixy2023/data/project/CTCF/CR/250617_bam_collect/idr"
 
 # 提取同一sample的不同rep
 ## 写for循环而不是while的原因：while 循环内部的变量赋值不会影响外部的变量，除非改的麻烦点。

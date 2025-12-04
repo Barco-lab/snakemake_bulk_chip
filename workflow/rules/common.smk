@@ -109,6 +109,12 @@ def get_alined_list(wildcards):
         return f"Results/04_align/{wildcards.sample}_pe.bowtie2_aln.sorted.sam"
 
 
+def get_dedu_list(wildcards):
+    if sample_info[wildcards.sample] == "SE":
+        return f"Results/05_dedu/{wildcards.sample}_mapped_sorted_dedu.bam"
+    else:
+        return f"Results/05_dedu/{wildcards.sample}_mapped_sorted_dedu.bam"
+
 def get_uniq_list(wildcards):
     if sample_info[wildcards.sample] == "SE":
         return f"Results/05_dedu/{wildcards.sample}_mapped_sorted_dedu_uniq.bam"

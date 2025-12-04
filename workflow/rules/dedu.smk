@@ -4,7 +4,7 @@ rule dedu_and_uniq:
     output:
         mapped_bam = temp("Results/05_dedu/{sample}_mapped.bam"),
         sorted_bam = temp("Results/05_dedu/{sample}_mapped_sorted.bam"),
-        dedu_bam = temp("Results/05_dedu/{sample}_mapped_sorted_dedu.bam"),
+        dedu_bam = "Results/05_dedu/{sample}_mapped_sorted_dedu.bam",
         uniq_bam = "Results/05_dedu/{sample}_mapped_sorted_dedu_uniq.bam",
         uniq_bam_bai = "Results/05_dedu/{sample}_mapped_sorted_dedu_uniq.bam.bai"
     conda:

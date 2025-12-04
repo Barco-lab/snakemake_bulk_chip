@@ -120,7 +120,7 @@ def main():
         mapped = extract_from_flagstat(log_file)
         mapped_reads_dict[sample] = mapped
         #print(f"Sample: {sample}, Mapped Reads: {mapped}")
-        mapping_rate_dict[sample] = mapped / clean_reads_dict.get(sample, 1)
+        mapping_rate_dict[sample] = (mapped / 2) / clean_reads_dict.get(sample, 1)
 
     for log_file in flagstat_dir.glob("*_mapped_sorted_dedu.flagstat"):
         sample = re.sub(r"_mapped_sorted_dedu\.flagstat$", "", log_file.name)
@@ -140,7 +140,7 @@ def main():
         sample = re.sub(r"_human(_se|_pe)\.log$", "", log_file.name)
         #print(log_file.name)
         aligned_reads = extract_from_align_log(log_file)
-        mapping_rate_dict_human[sample] = aligned_reads / clean_reads_dict.get(sample, 1)
+        mapping_rate_dict_human[sample] = (aligned_reads / 2) / clean_reads_dict.get(sample, 1)
 
     # 4. peak number
     for peakfile in peak_dir.glob("*_npks.bed"):
