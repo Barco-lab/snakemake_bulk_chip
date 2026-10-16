@@ -1,184 +1,116 @@
+"""
+每个样本一行的汇总表。reads 数按"片段"计：PE 为 read pairs，SE 为 reads（flagstat 的 reads 数 PE 除以 2）。
+  raw_reads           trim 前（trim_galore 报告 Total reads processed）
+  clean_reads         进入 bowtie2 的 reads
+  mapping_rate        bowtie2 overall alignment rate
+  contamination_rate  比对到污染物种的比例（contamination.enabled 时）
+  mito_rate           比对上的 reads 中线粒体的比例
+  filtered_reads      MAPQ / properly paired / chrM 过滤后
+  dup_rate            PCR 重复比例（相对 filtered_reads）
+  final_reads         去重后，用于 call peak 和 bigwig
+  peaks / frip        blacklist 过滤后的 peak 数与 FRiP（control 样本为空）
+  tss_enrichment      TSS 中心信号 / 两端 flank 信号（deeptools profile）
+"""
 import re
-import logging
-import pandas as pd
-from pathlib import Path
 import sys
+from pathlib import Path
 
-# trim_logs_dir = Path("Results/02_trim_out/logs/")
-# flagstat_dir = Path("Results/05_dedu/stat/")
-# align_logs_dir = Path("Results/04_align/logs/")
-# peak_dir = Path("Results/07_peak/narrow_q0.01")
-#
-# outputfile = Path("Results/summary.txt")
+import pandas as pd
 
-# 获取 Snakemake 参数
-trim_logs_dir = Path(snakemake.params.trim_log_dir)
-flagstat_dir = Path(snakemake.params.flagstat_dir)
-align_logs_dir = Path(snakemake.params.align_logs_dir)
-peak_dir = Path(snakemake.params.peak_dir)
-
-outputfile = Path(snakemake.output.summary)
-
-# 设置日志格式
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
-
-def extract_from_trim_log(log_file):
-    with open(log_file, 'r') as f:
-        content = f.read()
-
-    # Primary regex patterns
-    input_reads = re.search(r"Total number of sequences analysed:\s*(\d+)", content)
-    less_than_cutoff = re.search(r"Number of sequence pairs removed because at least one read was shorter than the length cutoff \(30 bp\):\s*(\d+)", content)
-    N_than_4 = re.search(r"Number of sequence pairs removed because at least one read contained more N\(s\) than the specified limit of 4:\s*(\d+)", content)
-
-    # Secondary fallback patterns
-    if not input_reads or not less_than_cutoff or not N_than_4:
-        input_reads = re.search(r"(\d+) sequences processed in total", content)
-        less_than_cutoff = re.search(r"Sequences removed because they became shorter than the length cutoff of 30 bp:\s*(\d+)", content)
-        N_than_4 = re.search(r"Sequences removed because they contained more Ns than the cutoff of 4:\s*(\d+)", content)
-
-    # Convert matches to integers (default to 0 if not found)
-    input_reads_value = int(input_reads.group(1)) if input_reads else 0
-    less_than_cutoff_value = int(less_than_cutoff.group(1)) if less_than_cutoff else 0
-    N_than_4_value = int(N_than_4.group(1)) if N_than_4 else 0
-
-    # Logging warnings if values are missing
-    if not input_reads:
-        logging.warning(f"{log_file} 没有找到 input_reads")
-    if not less_than_cutoff:
-        logging.warning(f"{log_file} 没有找到 less_than_cutoff")
-    if not N_than_4:
-        logging.warning(f"{log_file} 没有找到 N_than_4")
-
-    # Calculate trimmed reads
-    trimmed_reads = input_reads_value - less_than_cutoff_value - N_than_4_value
-    return input_reads_value, trimmed_reads
-
-def extract_from_align_log(log_file):
-    """Extract aligned read counts from a bowtie2 log file."""
-    with open(log_file, 'r') as f:
-        content = f.read()
-
-    # Primary pattern: "aligned concordantly exactly 1 time" and ">1 times"
-    exactly_1_match = re.search(r"(\d+) \(.*?\) aligned concordantly exactly 1 time", content)
-    more_than_1_match = re.search(r"(\d+) \(.*?\) aligned concordantly >1 times", content)
-
-    # Secondary pattern: "aligned exactly 1 time" and ">1 times"
-    if not exactly_1_match or not more_than_1_match:
-        exactly_1_match = re.search(r"(\d+) \(.*?\) aligned exactly 1 time", content)
-        more_than_1_match = re.search(r"(\d+) \(.*?\) aligned >1 times", content)
-
-    # Convert matches to integers and sum them
-    aligned_reads = sum(int(m.group(1)) for m in [exactly_1_match, more_than_1_match] if m)
-    return aligned_reads
-
-def extract_from_flagstat(flagstat):
-    with open(flagstat, 'r') as f:
-        content = f.read()
-
-    reads = re.search(r"(\d+)\s+\+\s+\d+\s+in total", content)
-    #  samtools view -c CT_3CHA09-HA_mapped_sorted_dedu_uniq.bam
-
-    if not reads:
-        logging.error(f"{flagstat} 缺失配对相关字段")
-        sys.exit(1)
-
-    return int(reads.group(1))
-
-def count_lines(file_path):
-    with open(file_path, 'r') as file:
-        lines = file.readlines()
-
-    if len(lines) == 0:
-        logging.warning(f"{file_path} 没有找到peak")
-
-    return len(lines)
-
-def main():
-    raw_reads_dict = {}
-    clean_reads_dict = {}
-    mapped_reads_dict = {}
-    mapping_rate_dict = {}
-    mapping_rate_dict_human = {}
-    dedu_reads_dict = {}
-    duplicates_rate_dict = {}
-    uniq_reads_dict = {}
-    uniq_ratio_dict = {}
-    peaknum_dic = {}
+sys.stderr = open(snakemake.log[0], "w")
 
 
-    # 1. trim log
-    for log_file in trim_logs_dir.glob("*.log"):
-        sample = log_file.stem
-        raw, clean = extract_from_trim_log(log_file)
-        raw_reads_dict[sample] = raw
-        clean_reads_dict[sample] = clean
-
-    # 2. flagstat
-    for log_file in flagstat_dir.glob("*_mapped_sorted.flagstat"):
-        sample = re.sub(r"_mapped_sorted\.flagstat$", "", log_file.name)
-        mapped = extract_from_flagstat(log_file)
-        mapped_reads_dict[sample] = mapped
-        #print(f"Sample: {sample}, Mapped Reads: {mapped}")
-        mapping_rate_dict[sample] = (mapped / 2) / clean_reads_dict.get(sample, 1)
-
-    for log_file in flagstat_dir.glob("*_mapped_sorted_dedu.flagstat"):
-        sample = re.sub(r"_mapped_sorted_dedu\.flagstat$", "", log_file.name)
-        dedu = extract_from_flagstat(log_file)
-        dedu_reads_dict[sample] = dedu
-        #print(f"Sample: {sample}, dedu Reads: {mapped}")
-        duplicates_rate_dict[sample] =(mapped_reads_dict.get(sample, 1) - dedu) / mapped_reads_dict.get(sample, 1)
-
-    for log_file in flagstat_dir.glob("*_mapped_sorted_dedu_uniq.flagstat"):
-        sample = re.sub(r"_mapped_sorted_dedu_uniq\.flagstat$", "", log_file.name)
-        uniq = extract_from_flagstat(log_file)
-        uniq_reads_dict[sample] = uniq
-        uniq_ratio_dict[sample] = uniq / dedu_reads_dict.get(sample, 1)
-
-    # 3. align log of human
-    for log_file in align_logs_dir.glob("*_human*.log"):
-        sample = re.sub(r"_human(_se|_pe)\.log$", "", log_file.name)
-        #print(log_file.name)
-        aligned_reads = extract_from_align_log(log_file)
-        mapping_rate_dict_human[sample] = (aligned_reads / 2) / clean_reads_dict.get(sample, 1)
-
-    # 4. peak number
-    for peakfile in peak_dir.glob("*_npks.bed"):
-        sample = re.sub(r"(_se|_pe)_npks$", "", peakfile.stem)
-        peak_number = count_lines(peakfile)
-
-        peaknum_dic[sample] = peak_number
-
-    # 6. 构建 DataFrame
-    df = pd.DataFrame({
-        "raw_reads": raw_reads_dict,
-        "clean_reads": clean_reads_dict,
-        "mapped_reads": mapped_reads_dict,
-        "mapped_rate": mapping_rate_dict,
-        "mapped_rate_human": mapping_rate_dict_human,
-        "dedu_reads": dedu_reads_dict,
-        "duplicates_rate": duplicates_rate_dict,
-        "uniq_reads": uniq_reads_dict,
-        "uniq_ratio": uniq_ratio_dict,
-        "peaknum": peaknum_dic
-    }).reset_index().rename(columns={"index": "filename"})
-
-    # 格式化：整数列与浮点列分别处理
-    int_cols = ["raw_reads", "clean_reads", "mapped_reads", "dedu_reads", "uniq_reads", "peaknum"]
-    float_cols = ["mapped_rate", "mapped_rate_human", "duplicates_rate", "uniq_ratio"]
-
-    for col in int_cols:
-        if col in df.columns:
-            df[col] = df[col].fillna(0).astype(int)
-
-    for col in float_cols:
-        if col in df.columns:
-            df[col] = df[col].astype(float).round(3)
-
-    # 输出结果
-    df.to_csv(outputfile, sep='\t', index=False, encoding='utf-8')
-    print("Wrote summary file to {}".format(outputfile))
+def grab(pattern, text, cast=int):
+    m = re.search(pattern, text)
+    return cast(m.group(1).replace(",", "")) if m else None
 
 
-if __name__ == "__main__":
-    main()
+def flagstat_reads(path):
+    return grab(r"(\d+) \+ \d+ in total", Path(path).read_text())
+
+
+def bowtie2_stats(path):
+    t = Path(path).read_text()
+    return grab(r"(\d+) reads; of these:", t), grab(r"([\d.]+)% overall alignment rate", t, float)
+
+
+def mito_rate(path, mito):
+    df = pd.read_csv(path, sep="\t", header=None, names=["chrom", "len", "mapped", "unmapped"])
+    total = df["mapped"].sum()
+    return df.loc[df["chrom"] == mito, "mapped"].sum() / total if total else None
+
+
+def tss_enrichment(path, flank):
+    """plotProfile --outFileNameData：每行一个样本，前两列为 label 与 group，之后为各 bin 的均值。"""
+    if not path:
+        return {}
+    out = {}
+    lines = Path(path).read_text().splitlines()
+    for line in lines[2:]:
+        f = line.split("\t")
+        vals = [float(x) for x in f[2:] if x != ""]
+        if len(vals) < 5:
+            continue
+        edge = max(1, len(vals) // 20)  # 两端各 5% 的 bin 作为背景
+        bg = (sum(vals[:edge]) + sum(vals[-edge:])) / (2 * edge)
+        center = max(vals[len(vals) // 2 - 1: len(vals) // 2 + 1])
+        out[f[0]] = center / bg if bg > 0 else None
+    return out
+
+
+meta = snakemake.params.meta
+inp = snakemake.input
+tss = tss_enrichment(inp.get("tss"), snakemake.params.tss_flank) if "tss" in inp.keys() else {}
+frip = {}
+for fp in inp.frip:
+    r = pd.read_csv(fp, sep="\t").iloc[0]
+    frip[r["sample"]] = r["frip"]
+peaks = {s: sum(1 for _ in open(p)) for s, p in zip(snakemake.params.peak_samples, inp.peaks)}
+contam = {}
+for fp in inp.contam:
+    contam[Path(fp).stem] = bowtie2_stats(fp)[1]
+
+rows = []
+for i, s in enumerate(snakemake.params.samples):
+    m = meta[s]
+    div = 2 if m["layout"] == "PE" else 1
+    clean, rate = bowtie2_stats(inp.bowtie2[i])
+    filt = flagstat_reads(inp.filtered[i])
+    final = flagstat_reads(inp.final[i])
+    row = {
+        "sample": s,
+        "role": m["role"],
+        "layout": m["layout"],
+        "control": m["control"],
+        "peak_type": m["peak_type"],
+        "raw_reads": grab(r"Total reads processed:\s+([\d,]+)", Path(inp.trim[i]).read_text()),
+        "clean_reads": clean,
+        "mapping_rate": rate / 100 if rate is not None else None,
+        "contamination_rate": contam[s] / 100 if s in contam else None,
+        "mito_rate": mito_rate(inp.idxstats[i], snakemake.params.mito),
+        "filtered_reads": filt // div if filt is not None else None,
+        "dup_rate": 1 - final / filt if filt else None,
+        "final_reads": final // div if final is not None else None,
+        "peaks": peaks.get(s),
+        "frip": frip.get(s),
+        "tss_enrichment": tss.get(s),
+    }
+    rows.append(row)
+
+df = pd.DataFrame(rows)
+if not contam:
+    df = df.drop(columns=["contamination_rate"])
+if not tss:
+    df = df.drop(columns=["tss_enrichment"])
+for c in df.columns:
+    if c.endswith(("_rate", "frip", "enrichment")):
+        df[c] = df[c].astype(float).round(4)
+    elif c.endswith("_reads") or c == "peaks":
+        df[c] = df[c].astype("Int64")
+df.to_csv(snakemake.output.tsv, sep="\t", index=False)
+
+with open(snakemake.output.mqc, "w") as f:
+    f.write("# id: 'pipeline_summary'\n# section_name: 'Pipeline summary'\n"
+            "# description: 'results/tables/summary.tsv（PE 按 read pairs 计）'\n"
+            "# plot_type: 'table'\n")
+    df.to_csv(f, sep="\t", index=False)

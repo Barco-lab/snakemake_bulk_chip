@@ -1,123 +1,201 @@
-# 解析input，生成output
-class SampleProcessor:
-    def __init__(self, config):
-        """
-        初始化 SampleProcessor。
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
-        参数:
-            config (dict): 包含 reads 和 bamCoverage 的配置信息。
-        """
-        self.reads = config.get("reads", [])
-        self.sample_names = []
-        self.sample_info = {}
-        self.binsize = config.get("bamCoverage", {}).get("binsize", 100)
-        self.q_threshold = config.get("MACS", {}).get("q_threshold", 0.05)
-        self.process_reads()
+import pandas as pd
+import yaml
 
-    def process_reads(self):
-        """
-        处理 reads 列表，提取样本名并确定是单端 (SE) 还是双端 (PE)。
-        """
-        for read in self.reads:
-            sample_name = read["read1"].split("/")[-1].replace("_1.fastq.gz", "").replace(".fastq.gz", "")
-            if sample_name in self.sample_names:
-                raise ValueError(f"Duplicate sample name '{sample_name}' found.")
-            self.sample_names.append(sample_name)
 
-            if "read2" in read and read["read2"]:
-                self.sample_info[sample_name] = "PE"
-            else:
-                self.sample_info[sample_name] = "SE"
+# ============================================================
+# 环境与参考
+# ============================================================
+ENV_MAIN = config["envs"]["main"]
+ENV_MACS = config["envs"]["macs3"]
 
-    def get_trim_ext(self, sample):
-        """
-        根据样本类型返回 trim 后的文件后缀名。
+if config["genome"] not in config["references"]:
+    raise ValueError(
+        f"genome '{config['genome']}' 不在 references 中，可选: {list(config['references'])}"
+    )
+REF = config["references"][config["genome"]]
 
-        参数:
-            sample (str): 样本名。
+CONTAM = config["contamination"]
+if CONTAM["enabled"]:
+    _idx = config["references"].get(CONTAM["genome"], {}).get("bowtie2_index", "")
+    if not _idx:
+        raise ValueError(
+            f"contamination.enabled=true，但 references.{CONTAM['genome']}.bowtie2_index 未填写"
+        )
+    CONTAM_INDEX = _idx
 
-        返回:
-            str: PE 返回 "1_val_1"，SE 返回 "trimmed"
-        """
-        return "1_val_1" if self.sample_info[sample] == "PE" else "trimmed"
+THREADS = config["threads"]
 
-    def generate_targets(self, sample, binsize,q_threshold):
-        """
-        生成给定样本的所有目标文件路径。
 
-        参数:
-            sample (str): 样本名
-            binsize (int): 可视化使用的 bin size
+def threads_for(step):
+    return THREADS.get(step, THREADS["default"])
 
-        返回:
-            list[str]: 目标路径列表
-        """
-        dt = 'pe' if self.sample_info[sample] == 'PE' else 'se'
-        suffixes = ["mapped_sorted", "mapped_sorted_dedu", "mapped_sorted_dedu_uniq"]
-        return [
-            f"Results/02_trim_out/{sample}_{self.get_trim_ext(sample)}.fq.gz",
-            f"Results/03_qc/rawdata/multiqc_report.html",
-            f"Results/03_qc/cleandata/multiqc_report.html",
-            f"Results/04_align/logs/{sample}_human_{dt}.log",
-            f"Results/05_dedu/{sample}_mapped_sorted_dedu_uniq.bam",
-            *[f"Results/05_dedu/stat/{sample}_{s}.flagstat" for s in suffixes],
-            f"Results/06_visualization/{sample}_unique_{binsize}.bw",
-            f"Results/06_visualization/bed/{sample}_unique_{binsize}.bed",
-            f"Results/07_peak/narrow_q{q_threshold}/{sample}_{dt}_peaks.narrowPeak",
-            f"Results/07_peak/narrow_q{q_threshold}/motifs/{sample}_{dt}/knownResults.txt",
-            f"Results/summary.txt"
+
+REMOVE_MITO = config["filter"]["remove_mito"]
+MITO = config["filter"]["mito_name"]
+
+
+# ============================================================
+# 样本表
+# ============================================================
+def load_samples(path):
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"样本表不存在: {path.resolve()}")
+    df = pd.read_csv(path, sep="\t", dtype=str, comment="#", index_col=False).fillna("")
+    df.columns = df.columns.str.strip()
+    for col in ("sample", "fq1"):
+        if col not in df.columns:
+            raise ValueError(f"样本表缺少必需列 '{col}': {path}")
+    for col in ("fq2", "control", "peak_type"):
+        if col not in df.columns:
+            df[col] = ""
+    df = df.apply(lambda c: c.str.strip())
+    df["peak_type"] = df["peak_type"].replace("", config["peak_type"])
+
+    errors = []
+    dup = df.loc[df["sample"].duplicated(), "sample"].tolist()
+    if dup:
+        errors.append(f"样本名重复: {dup}")
+    for s in df["sample"]:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", s):
+            errors.append(f"样本名只能包含字母、数字、. _ -（且不能以符号开头）: '{s}'")
+    for _, r in df.iterrows():
+        if r["peak_type"] not in ("narrow", "broad"):
+            errors.append(f"{r['sample']}: peak_type='{r['peak_type']}' 无效，可选 narrow / broad")
+        if r["control"]:
+            if r["control"] not in set(df["sample"]):
+                errors.append(f"{r['sample']}: control '{r['control']}' 不在样本表中")
+            elif r["control"] == r["sample"]:
+                errors.append(f"{r['sample']}: control 不能是自己")
+
+    for col in ("fq1", "fq2"):
+        df[col] = [
+            str((path.parent / p).resolve()) if p and not Path(p).is_absolute() else p
+            for p in df[col]
         ]
+    for _, r in df.iterrows():
+        for col in ("fq1", "fq2"):
+            if r[col] and not Path(r[col]).exists():
+                errors.append(f"{r['sample']}: {col} 文件不存在: {r[col]}")
 
-    def get_all_targets(self):
-        """
-        获取所有样本的目标文件路径。
-
-        返回:
-            list[str]: 所有样本的目标路径列表
-        """
-        all_paths = []
-        for sample in self.sample_names:
-            paths = self.generate_targets(sample, self.binsize,self.q_threshold)
-            all_paths.extend(paths)
-        return all_paths
+    if errors:
+        raise ValueError("样本表检查未通过:\n  " + "\n  ".join(errors))
+    return df.set_index("sample", drop=False)
 
 
-
-def get_fq_list(wildcards):
-    if sample_info[wildcards.sample] == "SE":
-        return f"{config['fq_dir']}/{wildcards.sample}.fastq.gz"
-    else:
-        return [
-            f"{config['fq_dir']}/{wildcards.sample}_1.fastq.gz",
-            f"{config['fq_dir']}/{wildcards.sample}_2.fastq.gz"
-        ]
+SAMPLES_DF = load_samples(config["samples"])
+SAMPLES = SAMPLES_DF["sample"].tolist()
+PE_SAMPLES = [s for s in SAMPLES if SAMPLES_DF.loc[s, "fq2"]]
+SE_SAMPLES = [s for s in SAMPLES if not SAMPLES_DF.loc[s, "fq2"]]
+# 被别的样本当作 control 的样本只做比对和 QC，不单独 call peak
+CONTROLS = sorted(set(SAMPLES_DF["control"]) - {""})
+PEAK_SAMPLES = [s for s in SAMPLES if s not in CONTROLS]
 
 
-def get_trimmed_list(wildcards):
-    if sample_info[wildcards.sample] == "SE":
-        return f"Results/02_trim_out/{wildcards.sample}_trimmed.fq.gz"
-    else:
-        return [
-            f"Results/02_trim_out/{wildcards.sample}_1_val_1.fq.gz",
-            f"Results/02_trim_out/{wildcards.sample}_2_val_2.fq.gz"
-        ]
-
-def get_alined_list(wildcards):
-    if sample_info[wildcards.sample] == "SE":
-        return f"Results/04_align/{wildcards.sample}_se.bowtie2_aln.sorted.sam"
-    else:
-        return f"Results/04_align/{wildcards.sample}_pe.bowtie2_aln.sorted.sam"
+def regex_of(names):
+    """把样本名列表转为 wildcard 约束；空列表返回永不匹配的正则。"""
+    return "|".join(re.escape(n) for n in names) if names else "(?!x)x"
 
 
-def get_dedu_list(wildcards):
-    if sample_info[wildcards.sample] == "SE":
-        return f"Results/05_dedu/{wildcards.sample}_mapped_sorted_dedu.bam"
-    else:
-        return f"Results/05_dedu/{wildcards.sample}_mapped_sorted_dedu.bam"
+wildcard_constraints:
+    sample=regex_of(SAMPLES),
+    read="R1|R2",
+    ptype="narrow|broad",
 
-def get_uniq_list(wildcards):
-    if sample_info[wildcards.sample] == "SE":
-        return f"Results/05_dedu/{wildcards.sample}_mapped_sorted_dedu_uniq.bam"
-    else:
-        return f"Results/05_dedu/{wildcards.sample}_mapped_sorted_dedu_uniq.bam"
 
+def is_pe(sample):
+    return sample in PE_SAMPLES
+
+
+def reads_of(sample):
+    return ["R1", "R2"] if is_pe(sample) else ["R1"]
+
+
+def control_of(sample):
+    return SAMPLES_DF.loc[sample, "control"]
+
+
+def peak_file(sample):
+    return f"results/03_peaks/{sample}.{SAMPLES_DF.loc[sample, 'peak_type']}Peak"
+
+
+def trimmed_reads(wc):
+    return [f"results/01_trim/{wc.sample}_{r}.trimmed.fq.gz" for r in reads_of(wc.sample)]
+
+
+def maybe_temp(path, key):
+    return path if config["keep"][key] else temp(path)
+
+
+# ============================================================
+# 目标文件
+# ============================================================
+def all_targets():
+    t = []
+    for s in SAMPLES:
+        t += expand("results/qc/fastqc_raw/{s}_{r}_fastqc.zip", s=s, r=reads_of(s))
+        t += expand("results/qc/fastqc_trimmed/{s}_{r}.trimmed_fastqc.zip", s=s, r=reads_of(s))
+        t.append(f"results/04_bigwig/{s}.bw")
+        if CONTAM["enabled"]:
+            t.append(f"results/qc/contamination/{s}.log")
+    for s in PEAK_SAMPLES:
+        t.append(peak_file(s))
+        if config["motif"]["enabled"] and SAMPLES_DF.loc[s, "peak_type"] == "narrow":
+            t.append(f"results/05_motif/{s}/knownResults.txt")
+    t += [
+        "results/tables/summary.tsv",
+        "results/qc/multiqc/multiqc_report.html",
+    ]
+    return t
+
+
+# ============================================================
+# 运行记录：logs/run_<时间>/
+# ============================================================
+def record_run(version_args):
+    """onstart 调用：保存本次运行的配置、样本表、流程版本与软件版本。"""
+    d = Path(RUN_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    with open(d / "config.yaml", "w") as f:
+        yaml.safe_dump(dict(config), f, allow_unicode=True, sort_keys=False)
+    shutil.copy(config["samples"], d / "samples.tsv")
+    pipe = Path(workflow.basedir).parent
+    git = subprocess.run(
+        ["git", "-C", str(pipe), "describe", "--always", "--dirty"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    (d / "pipeline.txt").write_text(
+        f"pipeline: {pipe}\nversion:  {git or 'unknown'}\ncommand:  {' '.join(sys.argv)}\n"
+    )
+    with open(d / "software_versions.tsv", "w") as f:
+        subprocess.run(
+            ["bash", str(pipe / "workflow/scripts/software_versions.sh"), *version_args],
+            stdout=f, stderr=subprocess.DEVNULL,
+            env={**os.environ, "SMK_PATH": sys.argv[0]},
+        )
+
+
+def finish_run(smk_log):
+    """onsuccess/onerror 调用：合并本次各任务的 benchmark 为一张表，并保存 snakemake 主日志。"""
+    d = Path(RUN_DIR)
+    if not d.is_dir():  # dry-run
+        return
+    bdir = d / "benchmarks"
+    tables = []
+    for f in sorted(bdir.rglob("*.tsv")):
+        df = pd.read_csv(f, sep="\t")
+        df.insert(0, "job", f.stem)
+        df.insert(0, "step", str(f.parent.relative_to(bdir)))
+        tables.append(df)
+    if tables:
+        pd.concat(tables).to_csv(d / "benchmarks.tsv", sep="\t", index=False)
+    shutil.rmtree(bdir, ignore_errors=True)
+    if smk_log:
+        shutil.copy(smk_log if isinstance(smk_log, str) else smk_log[0], d / "snakemake.log")

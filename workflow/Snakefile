@@ -1,29 +1,59 @@
-configfile: "config/config.yaml"
+import os
+from datetime import datetime
+
+from snakemake.utils import min_version
+
+min_version("9.12")  # pathvars
+
+
+configfile: workflow.source_path("../config/config.yaml")
+
+
+# 每执行一次 snakemake 生成一个 logs/run_<时间>/，本次所有任务的 log、benchmark 都放在里面。
+# 写入环境变量，保证同一次运行中派生的子进程使用同一个编号。
+RUN_ID = os.environ.setdefault("SMK_RUN_ID", datetime.now().strftime("run_%Y%m%d_%H%M%S"))
+RUN_DIR = f"logs/{RUN_ID}"
+
+
+pathvars:
+    logs=RUN_DIR,
+    benchmarks=f"{RUN_DIR}/benchmarks",
+
+
 include: "rules/common.smk"
-
-# 获取全局参数
-# print(f"Config: {config}")
-
-processor = SampleProcessor(config)
-sample_info = processor.sample_info
-samples = processor.sample_names
-
-# 限制生成samtools_flagstat时的suffixes
-SUFFIXES = ["mapped_sorted", "mapped_sorted_dedu", "mapped_sorted_dedu_uniq"]
-
-print(sample_info)
-#print(processor.get_all_targets())
+include: "rules/preprocess.smk"
+include: "rules/align.smk"
+include: "rules/peaks.smk"
+include: "rules/deeptools.smk"
+include: "rules/report.smk"
 
 
 rule all:
-    input: processor.get_all_targets()
+    input:
+        all_targets(),
+    default_target: True
 
-#load rules
-include: "rules/trim.smk"
-include: "rules/qc.smk"
-include: "rules/align.smk"
-include: "rules/dedu.smk"
-include: "rules/visualization.smk"
-include: "rules/callpeak.smk"
-include: "rules/call_motif.smk"
-include: "rules/summary.smk"
+
+onstart:
+    # 记录本次运行的配置、样本表、流程与软件版本（dry-run 不执行）
+    record_run([ENV_MAIN, ENV_MACS, FASTQC_JAVA])
+
+
+onsuccess:
+    finish_run(log)
+    print(
+        "\n流程完成。主要结果:\n"
+        "  results/tables/summary.tsv\n"
+        "  results/03_peaks/                   peak（已去除 blacklist 区域）\n"
+        "  results/04_bigwig/                  bigwig\n"
+        "  results/qc/multiqc/multiqc_report.html\n"
+        f"  {RUN_DIR}/        本次运行的 log、benchmarks.tsv\n"
+    )
+
+
+onerror:
+    finish_run(log)
+    print(
+        f"\n流程出错：请查看上方报错的规则及其 log（{RUN_DIR}/<步骤>/<样本>.log）。"
+        "修复后重新运行即可断点续跑。\n"
+    )

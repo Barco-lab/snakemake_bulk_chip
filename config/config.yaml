@@ -1,47 +1,99 @@
-fq_dir: ""
+# =====================================================================
+#  snakemake_bulk_chip 配置（ChIP-seq / CUT&Tag 等；ATAC-seq 请用 snakemake_bulk_atac）
+#  默认配置，所有项目共用，一般不要直接修改。
+#  运行时用 run.sh -c <项目配置> 指定项目配置（不存在时以本文件为模板生成），
+#  项目配置中的参数覆盖这里的值；每次运行实际使用的配置会存档到 <outdir>/logs/run_<时间>/config.yaml
+# =====================================================================
 
+# 样本表（相对 outdir）。run.sh 会根据 fastq 目录自动生成
+samples: samples.tsv
 
-# Input Reads
-reads:
-  - read1: " "  # Provide read1 file path
-    read2: " "  # Provide read2 file path if PE, else leave empty
+# 物种：references 中的一个 key
+genome: mm10
 
-#### 上面部分会通过run.sh提供，只用修改下面的部分 ####
+# 默认 peak 类型；samples.tsv 的 peak_type 列可按样本覆盖
+#   narrow: 转录因子、H3K4me3、H3K27ac 等
+#   broad : H3K27me3、H3K9me3、H3K36me3、H3K79me2 等
+peak_type: narrow
 
-# Environment
-conda_env: "base-omics"
-macs_env: "py312"
+# ---------------------------------------------------------------------
+# 软件环境（已有 conda 环境的路径）
+# ---------------------------------------------------------------------
+envs:
+  main: /opt/anaconda/envs/in202506             # trim_galore bowtie2 samtools fastqc multiqc homer
+  macs3: /home/LAB/lab_ab_1/.conda/envs/omics   # macs3 deeptools bedtools samtools
+fastqc_java: /usr/bin/java   # in202506 自带的 java 损坏，FastQC 改用系统 java；留空则用环境默认
 
-Spe: "mm10" # Species: "human" or "mm10" or "mm9"
+# 每个任务使用的线程数；总并发由 run.sh -j 控制
+threads:
+  default: 2
+  trim: 4
+  fastqc: 2
+  align: 16
+  filter: 8
+  deeptools: 8
+  motif: 8
+samtools_sort_mem: 2G        # samtools sort 每线程内存
 
-# Pipeline Configuration Parameters
+# ---------------------------------------------------------------------
+# 参考基因组（bowtie2 index、blacklist、GTF 的染色体命名必须一致，流程会自动检查）
+#   fasta : HOMER motif 使用
+#   gtf   : 生成 TSS 用于 TSS profile / enrichment
+# ---------------------------------------------------------------------
+references:
+  mm10:
+    bowtie2_index: /data/index/bowtie2/mm10/mm10
+    fasta: /data/index/cellranger/refdata-gex-mm10-2020-A/fasta/genome.fa
+    gtf: /data/index/cellranger/refdata-gex-mm10-2020-A/genes/genes.gtf
+    blacklist: /home/LAB/lab_ab_1/reference/blacklist/mm10-blacklist.v2.bed.gz
+    effective_genome_size: 2652783500
+  hg38:
+    bowtie2_index: ""        # 本机暂无，需要时自行构建（bowtie2-build）后填写
+    fasta: /data/index/cellranger/refdata-gex-GRCh38-2020-A/fasta/genome.fa
+    gtf: /data/index/cellranger/refdata-gex-GRCh38-2020-A/genes/genes.gtf
+    blacklist: /home/LAB/lab_ab_1/reference/blacklist/hg38-blacklist.v2.bed.gz
+    effective_genome_size: 2913022398
+
+# 污染检查：把 reads 再比对到另一个物种，只报告比对率
+contamination:
+  enabled: false
+  genome: hg38             # references 中的 key，需要填写 bowtie2_index
+
+# ---------------------------------------------------------------------
+# 各步骤参数
+# ---------------------------------------------------------------------
 trim:
   params: "--quality 20 --max_n 4 --length 30 --phred33"
 
-bowtie2:
-  params: "-q -N 1 -p 20"
-  index:
-    human: "/public/slst/home/zhenghui/guoli/database/index/bowtie2/ucsc/hg38/ucsc_hg38.bowtie2.index"
-    mm10: "/home_data/home/slst/leixy2023/data/database/mm10/index_bowtie2/mm10"
-    mm9: "/public/slst/home/qushy/toolkit/reference_genome/index/Bowtie2/mm9/ucsc_mm9.bowtie2_index"
+bowtie2:                   # PE 自动追加 --no-mixed --no-discordant
+  params: "-N 1"
 
-bamCoverage:
-  binsize: 100
+filter:
+  mapq: 30                 # 替代旧版的 grep -v "XS:i:"
+  mito_name: chrM
+  remove_mito: false       # true 时去除线粒体 reads
 
-MACS:
-  params: "--nomodel --nolambda --extsize 200 --min-length 100 -B"
-  q_threshold: 0.01
+macs3:
+  qvalue: 0.01
+  chip_control: "--keep-dup all"                                            # 有 input/IgG 对照
+  chip_no_control: "--keep-dup all --nomodel --nolambda --extsize 200 --min-length 100"  # 无对照（旧版参数）
+  broad: "--broad --broad-cutoff 0.1"
 
-find_motif:
-  params: " " #"-size 200 -len 12,14,16"
+bigwig:
+  binsize: 10
+  normalize: RPGC          # RPGC | CPM | RPKM | BPM | None
+  se_fragment_length: 200  # SE 数据 --extendReads 的长度
+  extra: ""
 
-# Effective genome size for deeptools
-deeptools:
-  genome_sizes:
-    hg19: 2864785220
-    hg38: 2913022398
-    mm10: 2652783500
-    mm9: 2620345972
+qc:
+  tss_profile: true        # TSS profile 与 TSS enrichment
+  tss_flank: 3000
 
-# Number of threads to use
-threads: 20
+motif:
+  enabled: false           # HOMER，仅对 narrow peak 的非 control 样本
+  size: 200                # summit ± size/2
+  params: ""               # 如 "-nomotif" 只做已知 motif，速度快很多
+
+keep:
+  trimmed_fastq: false     # false 时 trim 后的 fastq 在比对完成后自动删除
+  raw_bam: false           # false 时只保留过滤去重后的 BAM

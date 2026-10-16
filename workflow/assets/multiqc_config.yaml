@@ -1,0 +1,23 @@
+subtitle: "snakemake_bulk_chip"
+report_comment: "PE 样本的 reads 数按 read pairs 计。详细数值见 results/tables/summary.tsv。"
+
+module_order:
+  - custom_content
+  - fastqc:
+      name: "FastQC (raw)"
+      path_filters: ["*/fastqc_raw/*"]
+  - cutadapt
+  - fastqc:
+      name: "FastQC (trimmed)"
+      path_filters: ["*/fastqc_trimmed/*"]
+  - bowtie2
+  - samtools
+  - macs2
+  - deeptools
+
+extra_fn_clean_exts:
+  - ".fastq.gz"
+
+table_sample_merge:
+  "Read 1": "_R1"
+  "Read 2": "_R2"
