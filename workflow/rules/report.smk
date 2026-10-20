@@ -12,11 +12,16 @@ def qc_files():
     return d
 
 
+def trim_report(s, r):
+    return f"results/01_trim/reports/{s}_{r}.fastq.gz_trimming_report.txt"
+
+
 rule summary:
     input:
         unpack(lambda wc: qc_files()),
-        trim=[f"results/01_trim/reports/{s}_R1.fastq.gz_trimming_report.txt" for s in SAMPLES],
+        trim=[trim_report(s, r) for s in SAMPLES for r in reads_of(s)],
         bowtie2=expand("results/qc/bowtie2/{sample}.log", sample=SAMPLES),
+        raw=expand("results/02_align/stats/{sample}.raw.flagstat", sample=SAMPLES),
         idxstats=expand("results/02_align/stats/{sample}.raw.idxstats", sample=SAMPLES),
         filtered=expand("results/02_align/stats/{sample}.filtered.flagstat", sample=SAMPLES),
         final=expand("results/02_align/stats/{sample}.flagstat", sample=SAMPLES),
@@ -42,6 +47,8 @@ rule summary:
             }
             for s in SAMPLES
         },
+        trim={s: [trim_report(s, r) for r in reads_of(s)] for s in SAMPLES},
+        mapq=config["filter"]["mapq"],
         mito=MITO,
         tss_flank=config["qc"]["tss_flank"],
     log:

@@ -76,7 +76,7 @@ input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz
 |---|---|
 | trim | trim_galore（自动识别接头） |
 | bowtie2 | `-N 1`；PE 加 `--no-mixed --no-discordant` |
-| 线粒体 | 默认保留（`filter.remove_mito: true` 时去除），summary 中报告 `mito_rate` |
+| 线粒体 | 默认保留（`filter.remove_mito: true` 时去除），summary 中报告 `mito_rate (chrM) (%)` |
 | macs3 | 有对照：`-c control --keep-dup all`<br>无对照：`--nomodel --nolambda --extsize 200 --min-length 100`<br>broad：`--broad --broad-cutoff 0.1`；PE 用 `-f BAMPE` |
 | QC | FRiP、fingerprint、TSS profile / enrichment、片段长度分布 |
 
@@ -137,19 +137,21 @@ project/
         └── software_versions.tsv      # 各软件的版本与实际路径
 ```
 
-**summary.tsv 的各列**（PE 样本按 read pairs 计，修复了旧版 SE 样本也除以 2 的问题）：
+**summary.tsv 的各列**（reads 按单条 read 计，PE 为 R1 + R2；所有 rate 都以 `raw_reads` 为分母，单位 %；表头括号内为对应的 config 值；reads 数带千位分隔符）：
 
 | 列 | 含义 | 参考 |
 |---|---|---|
 | `raw_reads` / `clean_reads` | trim 前 / 进入 bowtie2 的 reads | |
-| `mapping_rate` | bowtie2 overall alignment rate | |
-| `contamination_rate` | 比对到污染物种的比例（可选） | |
-| `mito_rate` | 比对上的 reads 中 chrM 的比例 | |
-| `filtered_reads` | MAPQ、配对、chrM 过滤后 | |
-| `dup_rate` | PCR 重复比例 | |
-| `final_reads` | 去重后，用于 call peak 和 bigwig | |
-| `peaks` / `frip` | peak 数与 FRiP | ENCODE：TF ChIP 的 FRiP > 1% |
-| `tss_enrichment` | TSS 中心信号 / 两端背景（按 deeptools profile 估算） | |
+| `mapped_reads` | 比对上的 reads | |
+| `filtered_reads (q30)` | MAPQ（`filter.mapq`）、配对过滤后（`filter.remove_mito: true` 时也去掉 chrM） | |
+| `dedup_reads` | 去重后，用于 call peak 和 bigwig | |
+| `mapping_rate (%)` | mapped_reads / raw_reads | |
+| `dedup_rate (%)` | dedup_reads / raw_reads | |
+| `duplicates_rate (%)` | (filtered_reads − dedup_reads) / raw_reads | |
+| `mito_rate (chrM) (%)` | 线粒体 reads / raw_reads（`filter.mito_name`） |  |
+| `peaks` / `frip` | peak 数与 FRiP（peak 内 reads / dedup_reads） | ENCODE：TF ChIP 的 FRiP > 1% |
+| `tss_enrichment (±3000bp)` | TSS 中心信号 / 两端背景（按 deeptools profile 估算，`qc.tss_flank`） |  |
+| `contamination_rate (%)` | 比对到污染物种的 reads / raw_reads（仅 `contamination.enabled` 时输出） | |
 
 ---
 
