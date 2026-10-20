@@ -15,8 +15,8 @@ def bigwig_args(wc):
 
 rule bigwig:
     input:
-        bam="results/02_align/{sample}.bam",
-        bai="results/02_align/{sample}.bam.bai",
+        bam="results/02_align/{sample}.dedup.bam",
+        bai="results/02_align/{sample}.dedup.bam.bai",
     output:
         "results/04_bigwig/{sample}.bw",
     params:
@@ -35,7 +35,7 @@ rule bigwig:
 rule fingerprint:
     """ChIP 富集程度：IP 曲线越偏离对角线（相对 input）越好。"""
     input:
-        bam=expand("results/02_align/{sample}.bam", sample=SAMPLES),
+        bam=expand("results/02_align/{sample}.dedup.bam", sample=SAMPLES),
     output:
         png="results/qc/deeptools/fingerprint.png",
         counts="results/qc/deeptools/fingerprint.raw_counts.tsv",

@@ -2,9 +2,9 @@
 
 
 def macs3_input(wc):
-    d = {"treat": f"results/02_align/{wc.sample}.bam"}
+    d = {"treat": f"results/02_align/{wc.sample}.dedup.bam"}
     if control_of(wc.sample):
-        d["control"] = f"results/02_align/{control_of(wc.sample)}.bam"
+        d["control"] = f"results/02_align/{control_of(wc.sample)}.dedup.bam"
     return d
 
 
@@ -12,7 +12,7 @@ def macs3_args(wc):
     m = config["macs3"]
     s = wc.sample
     if control_of(s):
-        args = f"{m['chip_control']} -c results/02_align/{control_of(s)}.bam"
+        args = f"{m['chip_control']} -c results/02_align/{control_of(s)}.dedup.bam"
     else:
         args = m["chip_no_control"]
     if wc.ptype == "broad":
@@ -64,7 +64,7 @@ rule filter_blacklist:
 rule frip:
     """FRiP = 落在 peak 内的 reads / 全部 reads（过滤去重后的 BAM）。"""
     input:
-        bam="results/02_align/{sample}.bam",
+        bam="results/02_align/{sample}.dedup.bam",
         peak=lambda wc: peak_file(wc.sample),
     output:
         "results/qc/frip/{sample}.tsv",

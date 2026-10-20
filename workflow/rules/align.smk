@@ -104,11 +104,11 @@ rule filter_dedup:
         bam="results/02_align/{sample}.raw.bam",
         bai="results/02_align/{sample}.raw.bam.bai",
     output:
-        bam="results/02_align/{sample}.bam",
-        bai="results/02_align/{sample}.bam.bai",
+        bam="results/02_align/{sample}.dedup.bam",
+        bai="results/02_align/{sample}.dedup.bam.bai",
         filtered=temp("results/02_align/{sample}.filtered.bam"),
         flagstat_filtered="results/02_align/stats/{sample}.filtered.flagstat",
-        flagstat="results/02_align/stats/{sample}.flagstat",
+        flagstat="results/02_align/stats/{sample}.dedup.flagstat",
         markdup="results/02_align/stats/{sample}.markdup.txt",
     params:
         mapq=config["filter"]["mapq"],
@@ -146,9 +146,9 @@ rule filter_dedup:
 rule samtools_stats:
     """最终 BAM 的 samtools stats；MultiQC 据此绘制 insert size（片段长度）分布。"""
     input:
-        "results/02_align/{sample}.bam",
+        "results/02_align/{sample}.dedup.bam",
     output:
-        "results/02_align/stats/{sample}.stats",
+        "results/02_align/stats/{sample}.dedup.stats",
     threads: threads_for("filter")
     conda:
         ENV_MAIN

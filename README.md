@@ -119,7 +119,7 @@ project/
 │   ├── 03_peaks/macs3/{sample}/         # macs3 原始输出（xls、summits 等）
 │   ├── 04_bigwig/{sample}.bw            # ★
 │   ├── 05_motif/{sample}/               # HOMER（可选）
-│   ├── 02_align/{sample}.bam            # 过滤去重后的 BAM；stats/ 下为 flagstat、idxstats、markdup、samtools stats
+│   ├── 02_align/{sample}.dedup.bam      # 过滤去重后的 BAM（{sample}.raw.bam 为 bowtie2 原始比对）；stats/ 下为 flagstat、idxstats、markdup、samtools stats
 │   ├── 01_trim/reports/                 # trim_galore 报告
 │   ├── 00_raw/                          # 原始 fastq 的软链接（统一命名为 {sample}_R1/R2）
 │   └── qc/
