@@ -40,6 +40,9 @@ def threads_for(step):
 REMOVE_MITO = config["filter"]["remove_mito"]
 MITO = config["filter"]["mito_name"]
 
+# UCSC (chr1) <-> Ensembl (1) 染色体命名转换
+RENAME_CHROMS = str(Path(workflow.basedir) / "scripts/rename_chroms.awk")
+
 
 # ============================================================
 # 样本表

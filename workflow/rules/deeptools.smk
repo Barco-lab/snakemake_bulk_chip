@@ -56,19 +56,25 @@ rule fingerprint:
 
 
 rule tss_bed:
-    """从 GTF 的 gene 行提取 TSS（+ 链取 start，- 链取 end）。"""
+    """从 GTF 的 gene 行提取 TSS（+ 链取 start，- 链取 end），染色体名转换为 bowtie2 index 的命名。"""
     input:
-        REF["gtf"],
+        gtf=REF["gtf"],
+        chroms="results/reference/index_chroms.txt",
     output:
         "results/reference/tss.bed",
+    params:
+        rename=RENAME_CHROMS,
+    log:
+        "<logs>/tss_bed.log",
     localrule: True
     shell:
         """
-        if [[ {input} == *.gz ]]; then zcat {input}; else cat {input}; fi \
+        if [[ {input.gtf} == *.gz ]]; then zcat {input.gtf}; else cat {input.gtf}; fi \
         | awk -F'\\t' 'BEGIN {{OFS = "\\t"}} $3 == "gene" {{
             match($9, /gene_id "[^"]+"/); id = substr($9, RSTART + 9, RLENGTH - 10);
             tss = ($7 == "+") ? $4 - 1 : $5 - 1;
             print $1, tss, tss + 1, id, ".", $7 }}' \
+        | awk -F'\\t' -v OFS='\\t' -v col=1 -f {params.rename} {input.chroms} - 2> {log} \
         | sort -k1,1 -k2,2n -u > {output}
         """
 

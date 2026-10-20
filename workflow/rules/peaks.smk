@@ -87,11 +87,13 @@ rule frip:
 rule homer:
     """以 summit ± size/2 做 motif 分析；需要 references.<genome>.fasta。"""
     input:
-        "results/03_peaks/{sample}.narrowPeak",
+        peak="results/03_peaks/{sample}.narrowPeak",
+        chroms="results/reference/fasta_chroms.txt",
     output:
         "results/05_motif/{sample}/knownResults.txt",
     params:
         fasta=REF.get("fasta", ""),
+        rename=RENAME_CHROMS,
         half=config["motif"]["size"] // 2,
         extra=config["motif"]["params"],
         outdir="results/05_motif/{sample}",
@@ -106,13 +108,14 @@ rule homer:
         """
         bed={params.outdir}/summits.bed
         awk 'BEGIN {{OFS = "\\t"}} {{ s = $2 + $10; b = s - {params.half}; if (b < 0) b = 0;
-            print $1, b, s + {params.half}, $4, ".", "+" }}' {input} > $bed
+            print $1, b, s + {params.half}, $4, ".", "+" }}' {input.peak} \
+        | awk -F'\\t' -v OFS='\\t' -v col=1 -f {params.rename} {input.chroms} - > $bed 2> {log}
         if [ -s $bed ]; then
             findMotifsGenome.pl $bed {params.fasta} {params.outdir} -size given -p {threads} \
-                -preparsedDir {params.outdir}/preparsed {params.extra} > {log} 2>&1
+                -preparsedDir {params.outdir}/preparsed {params.extra} >> {log} 2>&1
             rm -rf {params.outdir}/preparsed
         else
-            echo "没有 peak，跳过 motif 分析" > {log}
+            echo "没有 peak，跳过 motif 分析" >> {log}
             touch {output}
         fi
         """

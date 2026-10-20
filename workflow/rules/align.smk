@@ -2,35 +2,58 @@
 
 
 rule check_reference:
-    """bowtie2 index、blacklist、GTF 的染色体命名必须一致（chr1 vs 1），不一致时尽早报错。"""
+    """bowtie2 index 与 blacklist 的染色体命名必须一致（chr1 vs 1）；GTF / fasta 使用时转换命名，
+    这里检查转换后能对上。不一致时尽早报错。"""
     output:
-        "results/qc/reference_check.txt",
+        check="results/qc/reference_check.txt",
+        index_chroms="results/reference/index_chroms.txt",
+        fasta_chroms="results/reference/fasta_chroms.txt",
     params:
         index=REF["bowtie2_index"],
         blacklist=REF.get("blacklist", ""),
         gtf=REF["gtf"],
+        fasta=REF.get("fasta", ""),
+        rename=RENAME_CHROMS,
     log:
         "<logs>/check_reference.log",
     conda:
         ENV_MAIN
     shell:
         """
-        bowtie2-inspect -n {params.index} | awk '{{print $1}}' | sort -u > {output}.idx
+        bowtie2-inspect -n {params.index} | awk '{{print $1}}' | sort -u > {output.index_chroms}
+        if [ -n "{params.fasta}" ]; then
+            grep '^>' {params.fasta} | awk '{{print substr($1, 2)}}' | sort -u > {output.fasta_chroms}
+        else
+            : > {output.fasta_chroms}
+        fi
         cat_any() {{ if [[ $1 == *.gz ]]; then zcat "$1"; else cat "$1"; fi; }}
+        rename() {{ awk -F'\\t' -v OFS='\\t' -v col=1 -f {params.rename} "$1" -; }}
         {{
-            echo "bowtie2 index: {params.index} ($(wc -l < {output}.idx) 条序列)"
-            for f in {params.blacklist} {params.gtf}; do
-                cat_any $f | grep -v '^#' | cut -f1 | sort -u > {output}.other
-                n=$(comm -12 {output}.idx {output}.other | wc -l)
-                echo "$f: 共有序列 $n / $(wc -l < {output}.other)"
+            echo "bowtie2 index: {params.index} ($(wc -l < {output.index_chroms}) 条序列)"
+            for f in {params.blacklist}; do
+                n=$(cat_any $f | grep -v '^#' | cut -f1 | sort -u | comm -12 {output.index_chroms} - | wc -l)
+                echo "$f: 共有序列 $n"
                 if [ "$n" -eq 0 ]; then
                     echo "错误: $f 与 bowtie2 index 没有共同的染色体名（检查 chr 前缀）" >&2
                     exit 1
                 fi
             done
-        }} > {output}.tmp 2> {log}
-        rm -f {output}.idx {output}.other
-        mv {output}.tmp {output}
+            n=$(cat_any {params.gtf} | grep -v '^#' | cut -f1 | sort -u | rename {output.index_chroms} | wc -l)
+            echo "{params.gtf}: 转换为 index 命名后共有序列 $n"
+            if [ "$n" -eq 0 ]; then
+                echo "错误: GTF 与 bowtie2 index 的染色体名无法对应" >&2
+                exit 1
+            fi
+            if [ -n "{params.fasta}" ]; then
+                n=$(rename {output.fasta_chroms} < {output.index_chroms} | wc -l)
+                echo "{params.fasta}: 转换为 fasta 命名后共有序列 $n"
+                if [ "$n" -eq 0 ]; then
+                    echo "错误: fasta 与 bowtie2 index 的染色体名无法对应" >&2
+                    exit 1
+                fi
+            fi
+        }} > {output.check}.tmp 2> {log}
+        mv {output.check}.tmp {output.check}
         """
 
 

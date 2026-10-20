@@ -36,21 +36,22 @@ threads:
 samtools_sort_mem: 2G        # samtools sort 每线程内存
 
 # ---------------------------------------------------------------------
-# 参考基因组（bowtie2 index、blacklist、GTF 的染色体命名必须一致，流程会自动检查）
+# 参考基因组（bowtie2 index 与 blacklist 的染色体命名必须一致，流程会自动检查）
 #   fasta : HOMER motif 使用
 #   gtf   : 生成 TSS 用于 TSS profile / enrichment
+#   fasta / gtf 与 RNA 流程同源（Ensembl，命名为 1 / MT），使用时自动与 index 命名（chr1 / chrM）互转
 # ---------------------------------------------------------------------
 references:
   mm10:
     bowtie2_index: /data/index/bowtie2/mm10/mm10
-    fasta: /data/index/cellranger/refdata-gex-mm10-2020-A/fasta/genome.fa
-    gtf: /data/index/cellranger/refdata-gex-mm10-2020-A/genes/genes.gtf
+    fasta: /data/genome/Mus_musculus.GRCm38.dna.primary_assembly.fa
+    gtf: /data/genome/release-100/Mus_musculus.GRCm38.100.gtf
     blacklist: /home/LAB/lab_ab_1/reference/blacklist/mm10-blacklist.v2.bed.gz
     effective_genome_size: 2652783500
   hg38:
     bowtie2_index: ""        # 本机暂无，需要时自行构建（bowtie2-build）后填写
-    fasta: /data/index/cellranger/refdata-gex-GRCh38-2020-A/fasta/genome.fa
-    gtf: /data/index/cellranger/refdata-gex-GRCh38-2020-A/genes/genes.gtf
+    fasta: /data/genome/Homo_sapiens.GRCh38.dna.primary_assembly.fa
+    gtf: /data/genome/release-100/Homo_sapiens.GRCh38.100.gtf
     blacklist: /home/LAB/lab_ab_1/reference/blacklist/hg38-blacklist.v2.bed.gz
     effective_genome_size: 2913022398
 
