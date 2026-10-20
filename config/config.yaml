@@ -16,6 +16,12 @@ genome: mm10
 #   broad : H3K27me3、H3K9me3、H3K36me3、H3K79me2 等
 peak_type: narrow
 
+# 污染检查：把 reads 再比对到另一个物种，只报告比对率
+contamination:
+  enabled: false
+  genome: hg38             # references 中的 key，需要填写 bowtie2_index
+
+
 # ---------------------------------------------------------------------
 # 软件环境（已有 conda 环境的路径）
 # ---------------------------------------------------------------------
@@ -55,11 +61,6 @@ references:
     blacklist: /home/LAB/lab_ab_1/reference/blacklist/hg38-blacklist.v2.bed.gz
     effective_genome_size: 2913022398
 
-# 污染检查：把 reads 再比对到另一个物种，只报告比对率
-contamination:
-  enabled: false
-  genome: hg38             # references 中的 key，需要填写 bowtie2_index
-
 # ---------------------------------------------------------------------
 # 各步骤参数
 # ---------------------------------------------------------------------
@@ -81,8 +82,8 @@ macs3:
   broad: "--broad --broad-cutoff 0.1"
 
 bigwig:
-  binsize: 10
-  normalize: RPGC          # RPGC | CPM | RPKM | BPM | None
+  binsize: 100
+  normalize: CPM          # RPGC | CPM | RPKM | BPM | None
   se_fragment_length: 200  # SE 数据 --extendReads 的长度
   extra: ""
 

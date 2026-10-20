@@ -84,7 +84,7 @@ input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz
 - 过滤条件为 MAPQ ≥ 30，并去掉 secondary、supplementary、unmapped reads；PE 只保留两端都合格的 properly paired；
 - 用 `samtools markdup -r` 删除 PCR 重复；
 - peak 去除 ENCODE blacklist 区域；
-- bigwig 默认 RPGC 归一化、bin 10bp，并排除 blacklist 区域。
+- bigwig 默认 CPM 归一化、bin 100bp，并排除 blacklist 区域。
 
 ---
 
@@ -97,7 +97,7 @@ input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz
 | `filter.mapq` | 默认 30 |
 | `filter.remove_mito` | 默认 false |
 | `macs3.qvalue` | 默认 0.01 |
-| `bigwig.normalize` | `RPGC`（默认）/ `CPM` / `RPKM` / `BPM` |
+| `bigwig.normalize` | `CPM`（默认）/ `RPGC` / `RPKM` / `BPM` / `None`；`bigwig.binsize` 默认 100 |
 | `motif.enabled` | HOMER，仅对 narrow peak 的非 control 样本；`motif.params: "-nomotif"` 只做已知 motif，速度快很多 |
 | `keep.raw_bam` | 默认 false：只保留过滤去重后的 BAM |
 
