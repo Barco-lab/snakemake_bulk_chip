@@ -1,5 +1,7 @@
 # snakemake_bulk_chip
 
+**中文** | [English](README.en.md)
+
 ChIP-seq（以及 CUT&Tag 等类似数据）本地分析流程（Snakemake ≥ 9.12）。
 ATAC-seq 请用 `pipeline/snakemake_bulk_atac`。
 
@@ -16,7 +18,7 @@ fastq ─► trim_galore ─► bowtie2 ─► 过滤（MAPQ≥30、properly pai
                                                                              ├─► fingerprint、samtools stats（片段长度）
                                                                              └─► HOMER motif（可选）
                                      可选：污染检查（比对到其它物种）
-                                     汇总：summary.tsv + MultiQC 报告
+                                     汇总：summary.tsv + QC 报告 + MultiQC
 ```
 
 </details>
@@ -76,7 +78,7 @@ input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz
 |---|---|
 | trim | trim_galore（自动识别接头） |
 | bowtie2 | `-N 1`；PE 加 `--no-mixed --no-discordant` |
-| 线粒体 | 默认保留（`filter.remove_mito: true` 时去除），summary 中报告 `mito_rate (chrM) (%)` |
+| 线粒体 | 默认保留（`filter.remove_mito: true` 时去除），summary 中报告 `mito_rate (chrM) (% of mapped)` |
 | macs3 | 有对照：`-c control --keep-dup all`<br>无对照：`--nomodel --nolambda --extsize 200 --min-length 100`<br>broad：`--broad --broad-cutoff 0.1`；PE 用 `-f BAMPE` |
 | QC | FRiP、fingerprint、TSS profile / enrichment、片段长度分布 |
 
@@ -84,7 +86,7 @@ input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz
 - 过滤条件为 MAPQ ≥ 30，并去掉 secondary、supplementary、unmapped reads；PE 只保留两端都合格的 properly paired；
 - 用 `samtools markdup -r` 删除 PCR 重复；
 - peak 去除 ENCODE blacklist 区域；
-- bigwig 默认 CPM 归一化、bin 100bp，并排除 blacklist 区域。
+- bigwig 默认 RPGC 归一化、bin 10bp，并排除 blacklist 区域。
 
 ---
 
@@ -92,12 +94,12 @@ input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz
 
 | 配置项 | 说明 |
 |---|---|
-| `genome` | `mm10` / `hg38`；每个物种有 `bowtie2_index`、`fasta`（HOMER 用）、`gtf`（TSS 用）、`blacklist`、`effective_genome_size` |
+| `genome` | `mm10` / `hg38`；每个物种有 `bowtie2_index`、`fasta`（HOMER 用）、`gtf`（取 protein_coding 基因的 TSS）、`blacklist`、`effective_genome_size` |
 | `contamination` | 污染检查：`enabled: true`，`genome` 默认 `hg38`。**本机目前没有人的 bowtie2 index**，打开前需先构建并填入 `references.hg38.bowtie2_index` |
 | `filter.mapq` | 默认 30 |
 | `filter.remove_mito` | 默认 false |
 | `macs3.qvalue` | 默认 0.01 |
-| `bigwig.normalize` | `CPM`（默认）/ `RPGC` / `RPKM` / `BPM` / `None`；`bigwig.binsize` 默认 100 |
+| `bigwig.normalize` | `RPGC`（默认）/ `CPM` / `RPKM` / `BPM` / `None`；`bigwig.binsize` 默认 10 |
 | `motif.enabled` | HOMER，仅对 narrow peak 的非 control 样本；`motif.params: "-nomotif"` 只做已知 motif，速度快很多 |
 | `keep.raw_bam` | 默认 false：只保留过滤去重后的 BAM |
 
@@ -114,7 +116,8 @@ blacklist 的来源和下载记录见 `~/reference/blacklist/download.log`。
 project/
 ├── samples.tsv
 ├── results/
-│   ├── tables/summary.tsv               # ★ 每个样本的 reads 数、比对率、重复率、peak 数、FRiP 等
+│   ├── qc/report.html                   # ★ QC 报告（单文件）：概览、流程与参数、QC 汇总表；指标说明与参考值见 workflow/report/qc_metrics.yaml
+│   ├── qc/summary.tsv                   # 每个样本的 reads 数、比对率、重复率、peak 数、FRiP 等（纯数字）
 │   ├── 03_peaks/{sample}.narrowPeak     # ★ 已去除 blacklist 的 peak（broad 样本为 .broadPeak）
 │   ├── 03_peaks/macs3/{sample}/         # macs3 原始输出（xls、summits 等）
 │   ├── 04_bigwig/{sample}.bw            # ★
@@ -137,21 +140,22 @@ project/
         └── software_versions.tsv      # 各软件的版本与实际路径
 ```
 
-**summary.tsv 的各列**（reads 按单条 read 计，PE 为 R1 + R2；所有 rate 都以 `raw_reads` 为分母，单位 %；表头括号内为对应的 config 值；reads 数带千位分隔符）：
+**summary.tsv 的各列**（reads 按单条 read 计，PE 为 R1 + R2；rate 以进入该步骤的 reads 为分母，单位 %，与 ENCODE 等公开标准口径一致；表头括号内为对应的 config 值与分母；参考值来自 ENCODE ChIP-seq 标准，详见 `results/qc/report.html`）：
 
 | 列 | 含义 | 参考 |
 |---|---|---|
 | `raw_reads` / `clean_reads` | trim 前 / 进入 bowtie2 的 reads | |
 | `mapped_reads` | 比对上的 reads | |
 | `filtered_reads (q30)` | MAPQ（`filter.mapq`）、配对过滤后（`filter.remove_mito: true` 时也去掉 chrM） | |
-| `dedup_reads` | 去重后，用于 call peak 和 bigwig | |
-| `mapping_rate (%)` | mapped_reads / raw_reads | |
-| `dedup_rate (%)` | dedup_reads / raw_reads | |
-| `duplicates_rate (%)` | (filtered_reads − dedup_reads) / raw_reads | |
-| `mito_rate (chrM) (%)` | 线粒体 reads / raw_reads（`filter.mito_name`） |  |
-| `peaks` / `frip` | peak 数与 FRiP（peak 内 reads / dedup_reads） | ENCODE：TF ChIP 的 FRiP > 1% |
-| `tss_enrichment (±3000bp)` | TSS 中心信号 / 两端背景（按 deeptools profile 估算，`qc.tss_flank`） |  |
-| `contamination_rate (%)` | 比对到污染物种的 reads / raw_reads（仅 `contamination.enabled` 时输出） | |
+| `dedup_reads` | 去重后，用于 call peak 和 bigwig；PE 除以 2 为 usable fragments | TF / narrow ≥ 20M，broad ≥ 45M fragments |
+| `clean_rate (% of raw)` | clean_reads / raw_reads | |
+| `mapping_rate (% of clean)` | mapped_reads / clean_reads | 与同批比较 |
+| `dedup_rate (% of filtered)` | dedup_reads / filtered_reads | |
+| `duplicates_rate (% of filtered)` | (filtered_reads − dedup_reads) / filtered_reads | 与同批比较；CUT&Tag 通常较高 |
+| `mito_rate (chrM) (% of mapped)` | 线粒体 reads / mapped_reads（`filter.mito_name`） | 与同批比较 |
+| `peaks` / `frip` | peak 数与 FRiP（peak 内 reads / dedup_reads） | TF ChIP 的 FRiP ≥ 1%（ENCODE 指南） |
+| `tss_enrichment (±3000bp)` | TSS 中心信号 / 两端背景（按 deeptools profile 估算，窗口由 `qc.tss_matrix` 决定） |  |
+| `contamination_rate (% of clean)` | clean reads 比对到污染物种的比例（仅 `contamination.enabled` 时输出） | |
 
 ---
 
@@ -173,7 +177,7 @@ bash $P/run.sh -c config.yaml -o chipseq_out -y -- --unlock              # 强�
 - 不再提交 PBS，改为本地运行；不再通过 `--config reads=<JSON>` 传参，改用 samples.tsv。
 - SE/PE 规则合并，文件名不再带 `_pe` / `_se`。
 - ATAC-seq 拆分为独立的 `snakemake_bulk_atac` 流程。
-- 新增 input/IgG 对照、broad peak、blacklist 过滤、FRiP、fingerprint、TSS enrichment、片段长度分布，以及可选的污染检查。
+- 新增 input/IgG 对照、broad peak、blacklist 过滤、FRiP、fingerprint、TSS enrichment、片段长度分布、QC 报告，以及可选的污染检查。
 - 唯一比对从 `grep -v "XS:i:"`（PE 会留下孤立 mate）改为 MAPQ ≥ 30 加 properly paired 过滤。
 - 去重从 sambamba 改为 `samtools markdup`（本机没有 sambamba）；call peak 使用 `omics` 环境中的 macs3。
 - HOMER 改为传入基因组 FASTA（本机 HOMER 没有安装基因组），以 summit ± 100bp 做 motif 分析。

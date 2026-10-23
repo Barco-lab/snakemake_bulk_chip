@@ -82,14 +82,15 @@ macs3:
   broad: "--broad --broad-cutoff 0.1"
 
 bigwig:
-  binsize: 100
-  normalize: CPM          # RPGC | CPM | RPKM | BPM | None
+  binsize: 10
+  normalize: RPGC         # RPGC | CPM | RPKM | BPM | None
   se_fragment_length: 200  # SE 数据 --extendReads 的长度
   extra: ""
 
 qc:
   tss_profile: true        # TSS profile 与 TSS enrichment
-  tss_flank: 3000
+  # computeMatrix 命令（-S / -R / --samplesLabel / -p / -o 由流程补上）
+  tss_matrix: "computeMatrix reference-point -a 3000 -b 3000 --binSize 50 --skipZeros"
 
 motif:
   enabled: false           # HOMER，仅对 narrow peak 的非 control 样本

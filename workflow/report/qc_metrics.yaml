@@ -1,0 +1,123 @@
+# QC 报告（results/qc/report.html）中各列的说明、参考值与检查规则，由 workflow/scripts/qc_report.py 读取。
+# 文字均为 {zh: 中文, en: English}，报告中可切换。
+#
+# metrics: summary.tsv 的列（不含括号部分）
+#   desc          含义与计算方式（鼠标停在表头上显示）
+#   ref           参考值
+#   sources       出处，对应下方 sources 的键
+#   digits        显示的小数位数（默认 2）
+#   outlier       true 时与本批样本比较：|值 - 中位数| > 3 x MAD（MAD x 1.4826 换算为标准差尺度）标为橙色
+#   outlier_when  只在满足条件的样本之间比较（如只比较 IP 样本）
+#   checks        有公开阈值的检查。when 限定样本（按 summary.tsv 的列取值），expr 为 Python 表达式，
+#                 可直接使用各列名（不含括号部分）；level 为 warn（橙）或 fail（红）
+# rate 以进入该步骤的 reads 为分母（%，见 summary.tsv 表头括号），与各软件报告和 ENCODE 标准口径一致。
+# ENCODE 的测序深度以 usable fragments 计：PE 为 dedup_reads / 2，SE 为 dedup_reads。
+
+metrics:
+  role:
+    desc: {zh: chip（IP 样本）/ control（input 或 IgG 对照）, en: chip (IP sample) / control (input or IgG)}
+  layout:
+    desc: {zh: SE 单端 / PE 双端, en: SE single-end / PE paired-end}
+  control:
+    desc: {zh: 该 IP 样本使用的对照, en: Control used for this IP sample}
+  peak_type:
+    desc: {zh: narrow / broad, en: narrow / broad}
+  raw_reads:
+    desc:
+      zh: trim 前的 reads（trim_galore 报告的 Total reads processed，PE 两个报告相加）
+      en: Reads before trimming (trim_galore "Total reads processed"; R1 + R2 for PE)
+  clean_reads:
+    desc: {zh: 去接头、低质量和过短 reads 后进入 bowtie2 的 reads, en: Reads entering bowtie2 after adapter / quality / length trimming}
+  mapped_reads:
+    desc: {zh: 比对上的 reads（bowtie2 输出 BAM 的 primary mapped）, en: Mapped reads (primary mapped in the bowtie2 BAM)}
+  filtered_reads:
+    desc:
+      zh: MAPQ 过滤、PE 只保留 properly paired 之后的 reads（filter.remove_mito 时另去掉线粒体）
+      en: Reads after MAPQ filtering and keeping properly paired reads for PE (mitochondrial reads removed if filter.remove_mito)
+  dedup_reads:
+    desc:
+      zh: 去除 PCR 重复后的 reads，用于 call peak 和 bigwig；PE 除以 2 即 ENCODE 的 usable fragments
+      en: Reads after duplicate removal, used for peaks and bigwig; divided by 2 for PE gives ENCODE usable fragments
+    ref:
+      zh: 每个重复的 usable fragments：TF 与 narrow 组蛋白标记 ≥ 20M（TF 10–20M 为偏低，< 10M 不足），broad 组蛋白标记 ≥ 45M。CUT&Tag 背景低，所需深度远低于 ChIP-seq
+      en: "Usable fragments per replicate: TF and narrow histone marks ≥ 20M (TF 10–20M low, < 10M insufficient), broad marks ≥ 45M. CUT&Tag needs far less depth"
+    sources: [ENCODE-TF, ENCODE-histone]
+    checks:
+      - when: {role: chip, peak_type: narrow}
+        expr: dedup_reads / (2 if layout == "PE" else 1) < 10e6
+        level: fail
+        message: {zh: usable fragments 低于 ENCODE 10M, en: usable fragments below the ENCODE 10M}
+      - when: {role: chip, peak_type: narrow}
+        expr: 10e6 <= dedup_reads / (2 if layout == "PE" else 1) < 20e6
+        level: warn
+        message: {zh: usable fragments 低于 ENCODE 建议的 20M, en: usable fragments below the ENCODE recommendation of 20M}
+      - when: {role: chip, peak_type: broad}
+        expr: dedup_reads / (2 if layout == "PE" else 1) < 45e6
+        level: warn
+        message: {zh: usable fragments 低于 ENCODE broad 标记建议的 45M, en: usable fragments below the ENCODE broad-mark recommendation of 45M}
+  clean_rate:
+    desc: {zh: clean_reads / raw_reads（trim 后保留的比例）, en: clean_reads / raw_reads (fraction kept after trimming)}
+    ref: {zh: 无统一标准；明显偏低多为接头二聚体或插入片段过短, en: No consensus threshold; low values usually mean adapter dimers or short inserts}
+    outlier: true
+  mapping_rate:
+    desc: {zh: mapped_reads / clean_reads, en: mapped_reads / clean_reads}
+    ref: {zh: ENCODE 没有单独阈值，与同批样本比较；明显偏低时考虑物种污染或参考基因组不匹配, en: No separate ENCODE cutoff; compare within the batch. Low values suggest contamination or a reference mismatch}
+    outlier: true
+  mito_rate:
+    desc: {zh: 线粒体 reads / mapped_reads（过滤前的 BAM）, en: Mitochondrial reads / mapped_reads (before filtering)}
+    ref: {zh: 无统一阈值，与同批样本比较, en: No consensus threshold; compare within the batch}
+    outlier: true
+  dedup_rate:
+    desc: {zh: dedup_reads / filtered_reads, en: dedup_reads / filtered_reads}
+    ref: {zh: 即 100 − duplicates_rate, en: i.e. 100 − duplicates_rate}
+  duplicates_rate:
+    desc:
+      zh: (filtered_reads − dedup_reads) / filtered_reads，samtools markdup 判定的 PCR 重复比例
+      en: (filtered_reads − dedup_reads) / filtered_reads, PCR duplicates flagged by samtools markdup
+    ref:
+      zh: 无直接阈值；ENCODE 以 NRF > 0.9、PBC1 > 0.9、PBC2 > 10 衡量文库复杂度（本流程未计算）。CUT&Tag 起始量低，重复率通常较高
+      en: No direct cutoff; ENCODE uses NRF > 0.9, PBC1 > 0.9, PBC2 > 10 (not computed here). CUT&Tag usually has higher duplication
+    sources: [ENCODE-TF]
+    outlier: true
+    outlier_when: {role: chip}
+  peaks:
+    desc: {zh: MACS3 call 出的 peak 数（去除 blacklist 区域后；对照样本为空）, en: MACS3 peaks after removing blacklist regions (empty for controls)}
+    ref: {zh: 随靶标差别很大，与同批同靶标样本比较, en: Depends strongly on the target; compare samples of the same target}
+    outlier: true
+  frip:
+    desc: {zh: peak 内的 reads / dedup_reads（比例，0–1；对照样本为空）, en: Fraction of dedup_reads in peaks (0–1; empty for controls)}
+    ref:
+      zh: ENCODE 现行标准不设阈值；ENCODE 指南（Landt 2012）以 TF ChIP-seq FRiP ≥ 1% 为参考。组蛋白标记和 CUT&Tag 通常明显更高
+      en: No threshold in the current ENCODE standards; the ENCODE guidelines (Landt 2012) use FRiP ≥ 1% for TF ChIP-seq. Histone marks and CUT&Tag are usually much higher
+    sources: [ENCODE-TF, Landt2012]
+    digits: 4
+    outlier: true
+    checks:
+      - when: {role: chip}
+        expr: frip < 0.01
+        level: warn
+        message: {zh: 低于 ENCODE 指南的 1%, en: below 1% (ENCODE guidelines)}
+  tss_enrichment:
+    desc:
+      zh: TSS 中心信号 / 两端背景（deeptools profile，protein_coding 基因的 TSS；窗口见表头）
+      en: TSS centre signal / flank background (deeptools profile over protein_coding TSSs; window in header)
+    ref:
+      zh: 无统一阈值，取决于靶标：启动子标记（如 H3K4me3、H3K27ac）应明显高于对照，H3K27me3 / H3K9me3 等则不一定富集在 TSS
+      en: No consensus threshold; depends on the target. Promoter marks (e.g. H3K4me3, H3K27ac) should be well above the control, repressive marks need not be
+    outlier: true
+    outlier_when: {role: chip}
+  contamination_rate:
+    desc: {zh: clean reads 比对到污染物种的比例, en: Fraction of clean reads aligning to the contaminant genome}
+    ref: {zh: 无统一标准，与同批样本比较, en: No consensus threshold; compare within the batch}
+    outlier: true
+
+sources:
+  ENCODE-TF:
+    name: ENCODE TF ChIP-seq data standards
+    url: https://www.encodeproject.org/chip-seq/transcription_factor/
+  ENCODE-histone:
+    name: ENCODE histone ChIP-seq data standards
+    url: https://www.encodeproject.org/chip-seq/histone/
+  Landt2012:
+    name: Landt SG, et al. ChIP-seq guidelines and practices of the ENCODE and modENCODE consortia. Genome Res 22, 1813–1831 (2012)
+    url: https://doi.org/10.1101/gr.136184.111

@@ -1,4 +1,4 @@
-# 汇总表、MultiQC
+# 汇总表、MultiQC、QC 报告
 
 
 def qc_files():
@@ -33,8 +33,7 @@ rule summary:
             else []
         ),
     output:
-        tsv="results/tables/summary.tsv",
-        mqc="results/qc/summary_mqc.tsv",
+        "results/qc/summary.tsv",
     params:
         samples=SAMPLES,
         peak_samples=PEAK_SAMPLES,
@@ -50,7 +49,7 @@ rule summary:
         trim={s: [trim_report(s, r) for r in reads_of(s)] for s in SAMPLES},
         mapq=config["filter"]["mapq"],
         mito=MITO,
-        tss_flank=config["qc"]["tss_flank"],
+        tss_matrix=config["qc"]["tss_matrix"],
     log:
         "<logs>/summary.log",
     script:
@@ -74,7 +73,7 @@ rule multiqc:
         bowtie2=expand("results/qc/bowtie2/{sample}.log", sample=SAMPLES),
         flagstat=expand("results/02_align/stats/{sample}.dedup.flagstat", sample=SAMPLES),
         peaks=[peak_file(s) for s in PEAK_SAMPLES],
-        summary="results/qc/summary_mqc.tsv",
+        summary="results/qc/summary.tsv",
         config=workflow.source_path("../assets/multiqc_config.yaml"),
     output:
         "results/qc/multiqc/multiqc_report.html",
@@ -98,3 +97,67 @@ rule multiqc:
             -n multiqc_report.html {params.files} > {log} 2>&1
         """
 
+
+
+def report_settings():
+    """QC 报告「流程与参数」中的参数表：(中文名, 英文名, 中文取值, 英文取值)，取值中 `...` 显示为代码。"""
+    c, ref, m = config, REF, config["macs3"]
+    b = c["bigwig"]
+    n_pe, n_se = len(PE_SAMPLES), len(SE_SAMPLES)
+    ip = SAMPLES_DF.loc[PEAK_SAMPLES]
+    with_ctrl = int((ip["control"] != "").sum())
+    types = "、".join(f"{v}（{n}）" for v, n in ip["peak_type"].value_counts().items())
+    types_en = ", ".join(f"{v} ({n})" for v, n in ip["peak_type"].value_counts().items())
+    mito_zh = f"去掉 {MITO}" if REMOVE_MITO else f"保留 {MITO}"
+    mito_en = f"{MITO} removed" if REMOVE_MITO else f"{MITO} kept"
+    return [
+        ("样本数", "Samples", f"{len(SAMPLES)}（IP {len(PEAK_SAMPLES)}，对照 {len(CONTROLS)}；SE {n_se}，PE {n_pe}）",
+         f"{len(SAMPLES)} (IP {len(PEAK_SAMPLES)}, control {len(CONTROLS)}; SE {n_se}, PE {n_pe})"),
+        ("peak 类型", "Peak type", types, types_en),
+        ("对照", "Control", f"{with_ctrl} 个 IP 样本有 input / IgG 对照，{len(PEAK_SAMPLES) - with_ctrl} 个无对照",
+         f"{with_ctrl} IP samples with input / IgG, {len(PEAK_SAMPLES) - with_ctrl} without"),
+        ("参考基因组", "Genome", c["genome"], c["genome"]),
+        ("bowtie2 index", "bowtie2 index", f"`{ref['bowtie2_index']}`", f"`{ref['bowtie2_index']}`"),
+        ("GTF（TSS）", "GTF (TSS)", f"`{ref['gtf']}`；只取 protein_coding 基因", f"`{ref['gtf']}`; protein_coding genes only"),
+        ("blacklist", "blacklist", f"`{ref['blacklist']}`" if ref.get("blacklist") else "无",
+         f"`{ref['blacklist']}`" if ref.get("blacklist") else "none"),
+        ("trim_galore", "trim_galore", f"`{c['trim']['params']}`", f"`{c['trim']['params']}`"),
+        ("bowtie2", "bowtie2", f"`{c['bowtie2']['params']}`；PE 另加 `--no-mixed --no-discordant`",
+         f"`{c['bowtie2']['params']}`; plus `--no-mixed --no-discordant` for PE"),
+        ("过滤", "Filtering", f"MAPQ ≥ {c['filter']['mapq']}，`-F 1804`，PE 只保留 properly paired；{mito_zh}；`samtools markdup -r` 去重",
+         f"MAPQ ≥ {c['filter']['mapq']}, `-F 1804`, properly paired only for PE; {mito_en}; duplicates removed with `samtools markdup -r`"),
+        ("MACS3", "MACS3",
+         f"q < {m['qvalue']}；有对照 `{m['chip_control']}`；无对照 `{m['chip_no_control']}`；broad 另加 `{m['broad']}`",
+         f"q < {m['qvalue']}; with control `{m['chip_control']}`; without `{m['chip_no_control']}`; broad adds `{m['broad']}`"),
+        ("bigwig", "bigwig", f"`--binSize {b['binsize']} --normalizeUsing {b['normalize']}`，排除 blacklist",
+         f"`--binSize {b['binsize']} --normalizeUsing {b['normalize']}`, blacklist excluded"),
+        ("TSS profile", "TSS profile", f"`{c['qc']['tss_matrix']}`" if c["qc"]["tss_profile"] else "不计算",
+         f"`{c['qc']['tss_matrix']}`" if c["qc"]["tss_profile"] else "disabled"),
+        ("污染检查", "Contamination", f"比对到 {CONTAM['genome']}" if CONTAM["enabled"] else "不检查",
+         f"aligned to {CONTAM['genome']}" if CONTAM["enabled"] else "disabled"),
+        ("motif", "motif", "HOMER（narrow、非对照样本）" if c["motif"]["enabled"] else "不分析",
+         "HOMER (narrow, non-control samples)" if c["motif"]["enabled"] else "disabled"),
+    ]
+
+
+rule qc_report:
+    """单文件 HTML 报告：概览、流程与参数、QC 汇总表（指标说明与参考值见 workflow/report/qc_metrics.yaml）。"""
+    input:
+        summary="results/qc/summary.tsv",
+        multiqc="results/qc/multiqc/multiqc_report.html",
+        metrics=workflow.source_path("../report/qc_metrics.yaml"),
+        flowchart=workflow.source_path("../../docs/images/bulk_chip_workflow.svg"),
+    output:
+        "results/qc/report.html",
+    params:
+        title=("ChIP-seq / CUT&Tag QC 报告", "ChIP-seq / CUT&Tag QC report"),
+        pipeline="snakemake_bulk_chip",
+        version=pipeline_version(Path(workflow.basedir).parent),
+        settings=report_settings(),
+        qvalue=config["macs3"]["qvalue"],
+        multiqc="multiqc/multiqc_report.html",  # 相对 report.html 的路径
+    log:
+        "<logs>/qc_report.log",
+    localrule: True
+    script:
+        "../scripts/qc_report.py"

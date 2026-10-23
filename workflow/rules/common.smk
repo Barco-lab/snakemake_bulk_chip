@@ -153,8 +153,9 @@ def all_targets():
         if config["motif"]["enabled"] and SAMPLES_DF.loc[s, "peak_type"] == "narrow":
             t.append(f"results/05_motif/{s}/knownResults.txt")
     t += [
-        "results/tables/summary.tsv",
+        "results/qc/summary.tsv",
         "results/qc/multiqc/multiqc_report.html",
+        "results/qc/report.html",
     ]
     return t
 

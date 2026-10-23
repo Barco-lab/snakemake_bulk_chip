@@ -1,18 +1,20 @@
 """
-每个样本一行的汇总表。reads 数按单条 read 计（PE 为 R1 + R2），所有 rate 都以 raw_reads 为分母（%）。
+每个样本一行的汇总表。reads 数按单条 read 计（PE 为 R1 + R2）。
+rate 以进入该步骤的 reads 为分母（与各软件报告、ENCODE 标准口径一致），分母写在表头中：
   raw_reads           trim 前（trim_galore 报告 Total reads processed，PE 两个报告相加）
   clean_reads         进入 bowtie2 的 reads
   mapped_reads        比对上的 reads（raw BAM flagstat primary mapped）
-  filtered_reads      MAPQ / properly paired / chrM 过滤后
-  dedup_reads         去重后，用于 call peak 和 bigwig
-  mapping_rate        mapped_reads / raw_reads
-  dedup_rate          dedup_reads / raw_reads
-  duplicates_rate     (filtered_reads - dedup_reads) / raw_reads
-  mito_rate           raw BAM 中线粒体 reads / raw_reads
-  peaks / frip        blacklist 过滤后的 peak 数与 FRiP（peak 内 reads / dedup BAM reads；control 样本为空）
+  filtered_reads      MAPQ / properly paired 过滤后（filter.remove_mito 时另去掉线粒体）
+  dedup_reads         去重后，用于 call peak 和 bigwig（PE 除以 2 即 ENCODE 的 usable fragments）
+  clean_rate          clean_reads / raw_reads
+  mapping_rate        mapped_reads / clean_reads
+  mito_rate           raw BAM 中线粒体 reads / mapped_reads
+  dedup_rate          dedup_reads / filtered_reads
+  duplicates_rate     (filtered_reads - dedup_reads) / filtered_reads
+  peaks / frip        blacklist 过滤后的 peak 数与 FRiP（peak 内 reads / dedup_reads；control 样本为空）
   tss_enrichment      TSS 中心信号 / 两端 flank 信号（deeptools profile）
-  contamination_rate  比对到污染物种的 reads / raw_reads（contamination.enabled 时）
-表头括号内为对应的 config 值。summary.tsv 的 reads 数带千位分隔符，MultiQC 用的表保持纯数字。
+  contamination_rate  trim 后 reads 比对到污染物种的比例（contamination.enabled 时）
+表头括号内为对应的 config 值与分母。输出纯数字，MultiQC 与 qc_report 读取。
 """
 import re
 import sys
@@ -50,7 +52,19 @@ def pct(n, total):
     return 100 * n / total if n is not None and total else None
 
 
-def tss_enrichment(path, flank):
+def matrix_window(cmd):
+    """从 computeMatrix 命令解析 -b / -a / --binSize（未写时用 deeptools 默认值 500 / 500 / 10）。"""
+    def opt(names, default):
+        m = re.search(r"(?:^|\s)(?:" + "|".join(names) + r")[\s=]+(\d+)", cmd)
+        return int(m.group(1)) if m else default
+    return (
+        opt(["-b", "--upstream", "--beforeRegionStartLength"], 500),
+        opt(["-a", "--downstream", "--afterRegionStartLength"], 500),
+        opt(["-bs", "--binSize"], 10),
+    )
+
+
+def tss_enrichment(path, up, bin_size):
     """plotProfile --outFileNameData：每行一个样本，前两列为 label 与 group，之后为各 bin 的均值。"""
     if not path:
         return {}
@@ -63,14 +77,16 @@ def tss_enrichment(path, flank):
             continue
         edge = max(1, len(vals) // 20)  # 两端各 5% 的 bin 作为背景
         bg = (sum(vals[:edge]) + sum(vals[-edge:])) / (2 * edge)
-        center = max(vals[len(vals) // 2 - 1: len(vals) // 2 + 1])
+        tss = up // bin_size  # TSS 右侧第一个 bin 的下标
+        center = max(vals[tss - 1: tss + 1])
         out[f[0]] = center / bg if bg > 0 else None
     return out
 
 
 meta = snakemake.params.meta
 inp = snakemake.input
-tss = tss_enrichment(inp.get("tss"), snakemake.params.tss_flank) if "tss" in inp.keys() else {}
+UP, DOWN, BIN = matrix_window(snakemake.params.tss_matrix)
+tss = tss_enrichment(inp.get("tss"), UP, BIN) if "tss" in inp.keys() else {}
 frip = {}
 for fp in inp.frip:
     r = pd.read_csv(fp, sep="\t").iloc[0]
@@ -82,9 +98,9 @@ for fp in inp.contam:
 
 # 表头括号内为对应的 config 值
 C_FILT = f"filtered_reads (q{snakemake.params.mapq})"
-C_MITO = f"mito_rate ({snakemake.params.mito}) (%)"
-C_TSS = f"tss_enrichment (±{snakemake.params.tss_flank}bp)"
-C_CONTAM = "contamination_rate (%)"
+C_MITO = f"mito_rate ({snakemake.params.mito}) (% of mapped)"
+C_TSS = f"tss_enrichment (±{UP}bp)" if UP == DOWN else f"tss_enrichment (-{UP}/+{DOWN}bp)"
+C_CONTAM = "contamination_rate (% of clean)"
 
 rows = []
 for i, s in enumerate(snakemake.params.samples):
@@ -96,11 +112,6 @@ for i, s in enumerate(snakemake.params.samples):
     mapped = flagstat_mapped(inp.raw[i])
     filt = flagstat_reads(inp.filtered[i])
     dedup = flagstat_reads(inp.final[i])
-    if s in contam and contam[s][0] is not None:
-        n, rate = contam[s]
-        contam_reads = n * div * rate / 100
-    else:
-        contam_reads = None
     row = {
         "sample": s,
         "role": m["role"],
@@ -112,14 +123,15 @@ for i, s in enumerate(snakemake.params.samples):
         "mapped_reads": mapped,
         C_FILT: filt,
         "dedup_reads": dedup,
-        "mapping_rate (%)": pct(mapped, raw),
-        "dedup_rate (%)": pct(dedup, raw),
-        "duplicates_rate (%)": pct(filt - dedup, raw) if filt is not None and dedup is not None else None,
-        C_MITO: pct(mito_reads(inp.idxstats[i], snakemake.params.mito), raw),
+        "clean_rate (% of raw)": pct(clean, raw),
+        "mapping_rate (% of clean)": pct(mapped, clean),
+        C_MITO: pct(mito_reads(inp.idxstats[i], snakemake.params.mito), mapped),
+        "dedup_rate (% of filtered)": pct(dedup, filt),
+        "duplicates_rate (% of filtered)": pct(filt - dedup, filt) if filt is not None and dedup is not None else None,
         "peaks": peaks.get(s),
         "frip": frip.get(s),
         C_TSS: tss.get(s),
-        C_CONTAM: pct(contam_reads, raw),
+        C_CONTAM: contam[s][1] if s in contam else None,
     }
     rows.append(row)
 
@@ -130,20 +142,11 @@ if not tss:
     df = df.drop(columns=[C_TSS])
 count_cols = [c for c in df.columns if "_reads" in c or c == "peaks"]
 for c in df.columns:
-    if c.endswith("(%)"):
+    if "(%" in c:
         df[c] = df[c].astype(float).round(2)
     elif c == "frip" or c == C_TSS:
         df[c] = df[c].astype(float).round(4)
     elif c in count_cols:
         df[c] = df[c].astype("Int64")
 
-out = df.copy()
-for c in count_cols:
-    out[c] = out[c].map(lambda v: "" if pd.isna(v) else f"{int(v):,}")
-out.to_csv(snakemake.output.tsv, sep="\t", index=False)
-
-with open(snakemake.output.mqc, "w") as f:
-    f.write("# id: 'pipeline_summary'\n# section_name: 'Pipeline summary'\n"
-            "# description: 'results/tables/summary.tsv（reads 按单条计，rate 以 raw_reads 为分母）'\n"
-            "# plot_type: 'table'\n")
-    df.to_csv(f, sep="\t", index=False)
+df.to_csv(snakemake.output[0], sep="\t", index=False)

@@ -56,7 +56,10 @@ rule fingerprint:
 
 
 rule tss_bed:
-    """从 GTF 的 gene 行提取 TSS（+ 链取 start，- 链取 end），染色体名转换为 bowtie2 index 的命名。"""
+    """
+    从 GTF 提取 protein_coding 基因的 TSS（+ 链取 start，- 链取 end），染色体名转换为 bowtie2 index 的命名。
+    只用 protein_coding，TSS enrichment 不受 GTF 中非编码基因数量的影响。
+    """
     input:
         gtf=REF["gtf"],
         chroms="results/reference/index_chroms.txt",
@@ -70,7 +73,7 @@ rule tss_bed:
     shell:
         """
         if [[ {input.gtf} == *.gz ]]; then zcat {input.gtf}; else cat {input.gtf}; fi \
-        | awk -F'\\t' 'BEGIN {{OFS = "\\t"}} $3 == "gene" {{
+        | awk -F'\\t' 'BEGIN {{OFS = "\\t"}} $3 == "gene" && $9 ~ /gene_(bio)?type "protein_coding"/ {{
             match($9, /gene_id "[^"]+"/); id = substr($9, RSTART + 9, RLENGTH - 10);
             tss = ($7 == "+") ? $4 - 1 : $5 - 1;
             print $1, tss, tss + 1, id, ".", $7 }}' \
@@ -89,7 +92,7 @@ rule tss_profile:
         data="results/qc/deeptools/tss_profile.tsv",
     params:
         labels=SAMPLES,
-        flank=config["qc"]["tss_flank"],
+        cmd=config["qc"]["tss_matrix"],
     threads: threads_for("deeptools")
     log:
         "<logs>/deeptools/tss_profile.log",
@@ -97,9 +100,8 @@ rule tss_profile:
         ENV_MACS
     shell:
         """
-        computeMatrix reference-point -S {input.bw} -R {input.tss} --samplesLabel {params.labels} \
-            -a {params.flank} -b {params.flank} --binSize 50 --skipZeros -p {threads} \
-            -o {output.matrix} > {log} 2>&1
+        {params.cmd} -S {input.bw} -R {input.tss} --samplesLabel {params.labels} \
+            -p {threads} -o {output.matrix} > {log} 2>&1
         plotProfile -m {output.matrix} -o {output.png} --outFileNameData {output.data} \
             --perGroup >> {log} 2>&1
         """
