@@ -586,6 +586,9 @@ if REP:
 # 页面
 # ------------------------------------------------------------
 title_zh, title_en = p.title
+# 项目：输出目录（snakemake --directory，即当前目录）的上两级，如 Patri_aging/out_atac
+OUTDIR = Path.cwd()
+PROJECT = "/".join(OUTDIR.parts[-2:])
 CSS = """
 :root {
   --bg: #f5f5f7; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #d2d2d7; --soft: #f5f5f7;
@@ -626,6 +629,8 @@ nav .ext { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line
 nav .ext a { display: block; padding: 6px 12px; font-size: 13px; }
 main { margin-left: 232px; padding: 40px 48px 80px; max-width: 1480px; }
 header.top h1 { font-size: 32px; font-weight: 700; letter-spacing: -.02em; margin: 0; }
+header.top .project { margin-top: 8px; font-size: 15px; font-weight: 600; }
+header.top .project .path { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; overflow-wrap: anywhere; }
 header.top .meta { color: var(--muted); margin-top: 6px; font-size: 13px; }
 section { margin-top: 44px; }
 section > h2 { font-size: 24px; font-weight: 600; letter-spacing: -.015em; margin: 0 0 16px; }
@@ -768,6 +773,7 @@ page = f"""<!doctype html>
 <main>
 <header class="top">
   <h1>{L(title_zh, title_en)}</h1>
+  <div class="project">{esc(PROJECT)}<span class="path">{esc(str(OUTDIR))}</span></div>
   <div class="meta">{esc(p.pipeline)} {esc(p.version)} · {L("生成于", "generated")} {datetime.now():%Y-%m-%d %H:%M} · {L(f"{n} 个样本", f"{n} samples")}</div>
 </header>
 
