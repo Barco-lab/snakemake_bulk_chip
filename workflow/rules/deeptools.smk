@@ -1,4 +1,4 @@
-# bigwig 与 deeptools QC：fingerprint（ChIP）、TSS profile / TSS enrichment
+# bigwig 与 deeptools QC：fingerprint（ChIP）、TSS profile / TSS enrichment、meta gene profile
 
 
 def bigwig_args(samples):
@@ -21,6 +21,12 @@ def group_bigwig_cmd(wc, input):
     if REF.get("blacklist"):
         args += f" --blackListFileName {REF['blacklist']}"
     return f"bigwigAverage -b {' '.join(input.bw)} {args}"
+
+
+def profile_plot_args(n):
+    """plotProfile 画在一张图上；图高随曲线数增加（cm），图例放在右上角（TES 一侧信号低）。"""
+    return (f"--perGroup --plotHeight {max(7, round(0.8 * n, 1))} --plotWidth 12 "
+            "--legendLocation upper-right --regionsLabel 'protein-coding genes'")
 
 
 def group_bigwig_input(wc):
@@ -149,6 +155,7 @@ rule tss_profile:
         data="results/qc/deeptools/tss_profile.tsv",
     params:
         labels=SAMPLES,
+        plot=profile_plot_args(len(SAMPLES)),
         cmd=config["qc"]["tss_matrix"],
     threads: threads_for("deeptools")
     log:
@@ -160,5 +167,65 @@ rule tss_profile:
         {params.cmd} -S {input.bw} -R {input.tss} --samplesLabel {params.labels} \
             -p {threads} -o {output.matrix} > {log} 2>&1
         plotProfile -m {output.matrix} -o {output.png} --outFileNameData {output.data} \
-            --perGroup >> {log} 2>&1
+            {params.plot} >> {log} 2>&1
+        """
+
+
+rule gene_bed:
+    """meta gene profile 用的 protein_coding 基因（TSS 到 TES，长度 ≥ qc.metagene_min_length），染色体名转换同 tss_bed。"""
+    input:
+        gtf=REF["gtf"],
+        chroms="results/reference/index_chroms.txt",
+    output:
+        "results/reference/genes.bed",
+    params:
+        rename=RENAME_CHROMS,
+        min_len=config["qc"]["metagene_min_length"],
+    log:
+        "<logs>/gene_bed.log",
+    localrule: True
+    shell:
+        """
+        if [[ {input.gtf} == *.gz ]]; then zcat {input.gtf}; else cat {input.gtf}; fi \
+        | awk -F'\\t' -v min={params.min_len} 'BEGIN {{OFS = "\\t"}}
+            $3 == "gene" && $9 ~ /gene_(bio)?type "protein_coding"/ && $5 - $4 + 1 >= min {{
+            match($9, /gene_id "[^"]+"/); id = substr($9, RSTART + 9, RLENGTH - 10);
+            print $1, $4 - 1, $5, id, ".", $7 }}' \
+        | awk -F'\\t' -v OFS='\\t' -v col=1 -f {params.rename} {input.chroms} - 2> {log} \
+        | sort -k1,1 -k2,2n -u > {output}
+        """
+
+
+def metagene_bw(wc):
+    if wc.set == "groups":
+        return expand("results/04_bigwig/groups/{group}.bw", group=BW_GROUPS)
+    return expand("results/04_bigwig/{sample}.bw", sample=SAMPLES)
+
+
+rule metagene_profile:
+    """meta gene profile：samples 为每个样本的 bigwig（含对照），groups 为组 bigwig。"""
+    input:
+        bw=metagene_bw,
+        genes="results/reference/genes.bed",
+    output:
+        matrix="results/qc/deeptools/metagene_{set}.matrix.gz",
+        png="results/qc/deeptools/metagene_{set}.png",
+        data="results/qc/deeptools/metagene_{set}.tsv",
+    wildcard_constraints:
+        set="samples|groups",
+    params:
+        labels=lambda wc: list(BW_GROUPS) if wc.set == "groups" else SAMPLES,
+        plot=lambda wc: profile_plot_args(len(BW_GROUPS) if wc.set == "groups" else len(SAMPLES)),
+        cmd=config["qc"]["metagene_matrix"],
+    threads: threads_for("deeptools")
+    log:
+        "<logs>/deeptools/metagene_{set}.log",
+    conda:
+        ENV_MACS
+    shell:
+        """
+        {params.cmd} -S {input.bw} -R {input.genes} --samplesLabel {params.labels} \
+            -p {threads} -o {output.matrix} > {log} 2>&1
+        plotProfile -m {output.matrix} -o {output.png} --outFileNameData {output.data} \
+            {params.plot} >> {log} 2>&1
         """

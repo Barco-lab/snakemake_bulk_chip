@@ -189,6 +189,7 @@ def all_targets():
             t.append(f"results/05_motif/{s}/knownResults.txt")
     if BW_GROUP["enabled"]:
         t += expand("results/04_bigwig/groups/{group}.bw", group=BW_GROUPS)
+    t += profile_files().values()
     if replicates_on():
         t += expand("results/03_peaks/reproducible/{group}.bed", group=REP_GROUPS)
         t += replicate_figure_files()

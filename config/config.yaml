@@ -108,6 +108,11 @@ qc:
   tss_profile: true        # TSS profile 与 TSS enrichment
   # computeMatrix 命令（-S / -R / --samplesLabel / -p / -o 由流程补上）
   tss_matrix: "computeMatrix reference-point -a 3000 -b 3000 --binSize 50 --skipZeros"
+  # meta gene profile：protein_coding 基因 TSS 到 TES（每个样本一张图；有组 bigwig 时每组再一张）
+  #   两端按真实距离各取 3 kb；TSS 下游 1 kb 不缩放（保留启动子峰形），其余基因体缩放到 5 kb
+  metagene_profile: true
+  metagene_min_length: 2000  # 只用长度 ≥ 该值的基因（短基因拉伸后 TSS、TES 两端的信号混在一起）
+  metagene_matrix: "computeMatrix scale-regions -b 3000 -a 3000 --regionBodyLength 5000 --unscaled5prime 1000 --binSize 50 --skipZeros"
 
 # 重复一致性（QC 报告「重复一致性」一节），只比较 IP 样本（被用作 control 的样本不参与）
 #   分组见 samples.tsv 的 group 列，为空时按样本名去掉 _repN 推断；同一组的 IP 样本 peak_type 须一致

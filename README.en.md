@@ -86,7 +86,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | bowtie2 | `-N 1`; plus `--no-mixed --no-discordant` for PE |
 | mitochondria | kept by default (removed with `filter.remove_mito: true`); summary reports `mito_rate (chrM) (% of mapped)` |
 | macs3 | with control: `-c control --keep-dup all`<br>without control: `--nomodel --nolambda --extsize 200 --min-length 100`<br>broad: `--broad --broad-cutoff 0.1`; `-f BAMPE` for PE |
-| QC | FRiP, fingerprint, TSS profile / enrichment, fragment length distribution |
+| QC | FRiP, fingerprint, TSS profile / enrichment, meta gene profile (TSS to TES), fragment length distribution |
 | replicates | IP samples only. Pairwise Jaccard of replicate peaks and Venn diagrams of the bases covered by each replicate combination (bedtools multiinter, groups of 2–4 replicates), and between groups using each group's reproducible peaks (`replicates.group_venn` sets the groups compared); within-group consensus sets from DiffBind (reproducible peaks present in ≥ 2 replicates), merged across groups into consensus peaks and counted with `dba.count` on IP reads (input not subtracted; summit ± 200 bp for narrow, merged widths when broad groups are present), log2(CPM + 1) for correlation (heatmap and scatter-plot matrix), clustering and PCA; sex of every sample (controls included) inferred from the fraction of mapped reads on chrX and chrY (called from the chrY region; chrX only compared within groups) |
 
 Other settings:
@@ -101,7 +101,7 @@ Other settings:
 
 | Key | Description |
 |---|---|
-| `genome` | `mm10` / `hg38`; each has `bowtie2_index`, `fasta` (for HOMER), `gtf` (TSSs of protein_coding genes), `blacklist`, `effective_genome_size` |
+| `genome` | `mm10` / `hg38`; each has `bowtie2_index`, `fasta` (for HOMER), `gtf` (TSSs and gene bodies of protein_coding genes), `blacklist`, `effective_genome_size` |
 | `contamination` | Contamination check: `enabled: true`, `genome` defaults to `hg38`. **There is currently no human bowtie2 index on this machine**; build one and fill in `references.hg38.bowtie2_index` before enabling |
 | `filter.mapq` | Default 30 |
 | `filter.remove_mito` | Default false |
@@ -127,7 +127,7 @@ The source and download record of the blacklist are in `~/reference/blacklist/do
 project/
 ├── samples.tsv
 ├── results/
-│   ├── qc/report.html                   # ★ QC report (single file): overview, workflow & parameters, QC summary, replicate consistency; definitions and references in workflow/report/qc_metrics.yaml
+│   ├── qc/report.html                   # ★ QC report (single file): overview, workflow & parameters, QC summary, replicate consistency, signal profiles; definitions and references in workflow/report/qc_metrics.yaml
 │   ├── qc/summary.tsv                   # reads, mapping rate, duplicate rate, peaks, FRiP, etc. per sample (plain numbers)
 │   ├── 03_peaks/{sample}.narrowPeak     # ★ peaks with blacklist regions removed (.broadPeak for broad samples)
 │   ├── 03_peaks/macs3/{sample}/         # raw macs3 output (xls, summits, etc.)
@@ -145,7 +145,8 @@ project/
 │       ├── reference_check.txt          # chromosome naming check of index, blacklist and GTF
 │       ├── replicates/                  # replicate consistency: samples.tsv, groups.tsv, peak_overlap.tsv, peak_venn.tsv, group_venn.tsv, correlation.tsv, log2cpm.tsv, pca.tsv,
 │       │                                #   peak_counts.tsv (consensus peak count matrix), diffbind.rds (DBA object for differential analysis); figures/ holds PDF, PNG (300 dpi) and SVG
-│       └── fastqc_*/  frip/  deeptools/  contamination/
+│       ├── deeptools/                   # fingerprint, tss_profile, metagene_samples / metagene_groups (meta gene profile; PNG, TSV, matrix)
+│       └── fastqc_*/  frip/  contamination/
 └── logs/
     └── run_<time>/                    # one per snakemake run; a resumed run only contains the jobs it actually ran
         ├── <step>/<sample>.log        # look here first when something fails

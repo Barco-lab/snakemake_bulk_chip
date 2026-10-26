@@ -619,6 +619,92 @@ if REP:
 
 
 # ------------------------------------------------------------
+# 信号 profile（deeptools plotProfile 的 PNG）
+# ------------------------------------------------------------
+def mx_opt(cmd, names, default):
+    """computeMatrix 命令中某个参数的值（未写时用 deeptools 默认值）。"""
+    m = re.search(r"(?:^|\s)(?:" + "|".join(names) + r")[\s=]+(\d+)", cmd)
+    return int(m.group(1)) if m else default
+
+
+def n_lines(path):
+    with open(path) as f:
+        return sum(1 for _ in f)
+
+
+prof = p.profile
+prof_figs = []
+if "prof_tss" in inp.keys():
+    up, down = mx_opt(prof["tss"], ["-b", "--upstream", "--beforeRegionStartLength"], 500), mx_opt(prof["tss"], ["-a", "--downstream", "--afterRegionStartLength"], 500)
+    n_tss = n_lines(inp.prof_tss_bed)
+    prof_figs.append((
+        "tss_profile", inp.prof_tss,
+        ("TSS profile", "TSS profile"),
+        (f"每条线为一个样本（包括对照）在 {n_tss:,} 个 protein_coding 基因 TSS 上游 {up:,} bp 到下游 {down:,} bp 的平均信号"
+         f"（bigwig，{prof['norm']} 归一化）。基因按 GTF 的链方向排列，左为上游。启动子标记和开放染色质在 TSS 处形成尖峰，"
+         "对照（input / IgG）应接近平坦；汇总表中的 TSS enrichment 由此图的数据计算。",
+         f"Each line is the mean signal of one sample (controls included) from {up:,} bp upstream to {down:,} bp downstream of the "
+         f"TSS of {n_tss:,} protein_coding genes (bigwig, {prof['norm']} normalized). Genes are oriented by their GTF strand, "
+         "upstream on the left. Promoter marks and open chromatin peak sharply at the TSS, while controls (input / IgG) should "
+         "stay flat; the TSS enrichment in the summary table is computed from these data."),
+    ))
+if "prof_samples" in inp.keys():
+    mg = prof["metagene"]
+    b, a = mx_opt(mg, ["-b", "--upstream", "--beforeRegionStartLength"], 0), mx_opt(mg, ["-a", "--downstream", "--afterRegionStartLength"], 0)
+    body = mx_opt(mg, ["-m", "--regionBodyLength"], 1000)
+    u5, u3 = mx_opt(mg, ["--unscaled5prime"], 0), mx_opt(mg, ["--unscaled3prime"], 0)
+    n_genes = n_lines(inp.prof_genes)
+    unscaled_zh = (f"TSS 下游 {u5:,} bp" if u5 else "") + ("、" if u5 and u3 else "") + (f"TES 上游 {u3:,} bp" if u3 else "")
+    unscaled_en = (f"the first {u5:,} bp after the TSS" if u5 else "") + (" and " if u5 and u3 else "") + (f"the last {u3:,} bp before the TES" if u3 else "")
+    scale_zh = (f"TSS 上游 {b:,} bp、TES 下游 {a:,} bp" + (f"以及{unscaled_zh}" if unscaled_zh else "") + "按真实距离；"
+                f"其余基因体统一缩放到 {body:,} bp，这一段横轴是基因内的相对位置，不是真实距离。")
+    scale_en = (f"{b:,} bp upstream of the TSS and {a:,} bp downstream of the TES" + (f", as well as {unscaled_en}," if unscaled_en else "")
+                + f" are drawn to true distance; the rest of each gene body is scaled to {body:,} bp, so that part of the x axis is the "
+                "relative position within the gene, not distance.")
+    genes_zh = f"{n_genes:,} 个 protein_coding 基因（TSS 到 TES，长度 ≥ {prof['min_len']:,} bp）"
+    genes_en = f"{n_genes:,} protein_coding genes (TSS to TES, ≥ {prof['min_len']:,} bp)"
+    prof_figs.append((
+        "metagene_samples", inp.prof_samples,
+        ("Meta gene profile：每个样本", "Meta gene profile: per sample"),
+        (f"每条线为一个样本（包括对照）在 {genes_zh}上的平均信号（bigwig，{prof['norm']} 归一化）。{scale_zh}"
+         "基因按 GTF 的链方向排列，左为 5′ 端。对照应接近平坦；启动子标记集中在 TSS，基因体标记（如 H3K36me3、H3K79me2）"
+         "在基因体内升高。",
+         f"Each line is the mean signal of one sample (controls included) over {genes_en} (bigwig, {prof['norm']} normalized). "
+         f"{scale_en} Genes are oriented by their GTF strand, 5′ end on the left. Controls should stay flat; promoter marks "
+         "concentrate at the TSS, gene-body marks (e.g. H3K36me3, H3K79me2) rise across the gene body."),
+    ))
+    if "prof_groups" in inp.keys():
+        gz, ge = (("合并组内重复的 BAM 后生成", "replicate BAMs merged") if prof["group_method"] == "merge"
+                  else ("各重复的 bigwig 逐 bin 取平均", "replicate bigwigs averaged per bin"))
+        prof_figs.append((
+            "metagene_groups", inp.prof_groups,
+            ("Meta gene profile：每组", "Meta gene profile: per group"),
+            (f"同上图，每条线为一组的组 bigwig（{gz}；只包括 IP 样本、有 ≥ 2 个参与合并的重复的组）。",
+             f"As above, each line is the bigwig of one group ({ge}; IP samples only, groups with ≥ 2 merged replicates)."),
+        ))
+
+prof_html = ""
+if prof_figs:
+    k0 = len(p.rep_figures) if REP else 0
+    items = []
+    for k, (name, path, (tz, te), (nz, ne)) in enumerate(prof_figs, k0 + 1):
+        png = base64.b64encode(Path(path).read_bytes()).decode()
+        stem = Path(path).stem
+        links = " · ".join(f'<a href="deeptools/{stem}.{x}" target="_blank">{x.upper()}</a>' for x in ("png", "tsv"))
+        items.append(
+            f'<figure class="card apa" id="fig-{name}"><div class="fig-label">{L(f"图 {k}", f"Figure {k}")}</div>'
+            f'<div class="fig-title">{L(tz, te)}</div><div class="fig-img prof"><img src="data:image/png;base64,{png}" alt=""></div>'
+            f'<figcaption><i>{L("注：", "Note.")}</i> {L(nz, ne)}</figcaption><div class="muted dl">{links}</div></figure>'
+        )
+    prof_html = f"""
+<section id="profiles">
+  <h2>{L("信号 profile", "Signal profiles")}</h2>
+  {"".join(items)}
+</section>
+"""
+
+
+# ------------------------------------------------------------
 # 页面
 # ------------------------------------------------------------
 title_zh, title_en = p.title
@@ -732,6 +818,7 @@ figure.apa { margin: 0 0 20px; }
 .fig-title { font-style: italic; margin-bottom: 12px; }
 .fig-img { background: #fff; border-radius: 12px; padding: 8px; max-width: 880px; }
 .fig-img svg, .fig-img img { width: 100%; height: auto; display: block; }
+.fig-img.prof img { max-width: 820px; margin: 0 auto; background: #fff; border-radius: 6px; }
 figure.apa figcaption { margin-top: 12px; font-size: 13px; max-width: 880px; }
 .dl { margin-top: 6px; }
 @media (max-width: 860px) {
@@ -837,6 +924,7 @@ page = f"""<!doctype html>
   <a class="item" href="#workflow">{L("流程与参数", "Workflow & parameters")}</a>
   <a class="item" href="#summary">{L("QC 汇总表", "QC summary")}</a>
   {f'<a class="item" href="#replicates">{L("重复一致性", "Replicate consistency")}</a>' if REP else ""}
+  {f'<a class="item" href="#profiles">{L("信号 profile", "Signal profiles")}</a>' if prof_html else ""}
   <div class="ext"><a href="{esc(p.multiqc)}" target="_blank">{L("MultiQC 报告", "MultiQC report")} ↗</a></div>
 </nav>
 <main>
@@ -887,6 +975,7 @@ page = f"""<!doctype html>
   </div>
 </section>
 {rep_html}
+{prof_html}
 </main>
 <script>{JS}</script>
 </body>

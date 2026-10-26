@@ -86,7 +86,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | bowtie2 | `-N 1`；PE 加 `--no-mixed --no-discordant` |
 | 线粒体 | 默认保留（`filter.remove_mito: true` 时去除），summary 中报告 `mito_rate (chrM) (% of mapped)` |
 | macs3 | 有对照：`-c control --keep-dup all`<br>无对照：`--nomodel --nolambda --extsize 200 --min-length 100`<br>broad：`--broad --broad-cutoff 0.1`；PE 用 `-f BAMPE` |
-| QC | FRiP、fingerprint、TSS profile / enrichment、片段长度分布 |
+| QC | FRiP、fingerprint、TSS profile / enrichment、meta gene profile（TSS 到 TES）、片段长度分布 |
 | 重复一致性 | 只比较 IP 样本。组内重复两两 peak 的 Jaccard，及各重复组合独有碱基数的 Venn 图（bedtools multiinter，2–4 个重复的组）；组间同样用各组 reproducible peak 画 Venn 图（`replicates.group_venn` 指定比较哪些组）；用 DiffBind 求各组组内 consensus（在 ≥ 2 个重复中出现的 reproducible peak），各组取并集为 consensus peak，`dba.count` 计数 IP（不扣除 input；narrow 取峰顶 ± 200 bp，有 broad 的组时保留原宽度）后以 log2(CPM + 1) 计算相关性（热图与散点矩阵）、层次聚类和 PCA；按 chrX、chrY reads 占全部比对 reads 的比例推断所有样本（含对照）的性别（以 chrY 计数区判定，chrX 只在组内比较） |
 
 其它设置：
@@ -101,7 +101,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 
 | 配置项 | 说明 |
 |---|---|
-| `genome` | `mm10` / `hg38`；每个物种有 `bowtie2_index`、`fasta`（HOMER 用）、`gtf`（取 protein_coding 基因的 TSS）、`blacklist`、`effective_genome_size` |
+| `genome` | `mm10` / `hg38`；每个物种有 `bowtie2_index`、`fasta`（HOMER 用）、`gtf`（取 protein_coding 基因的 TSS 与基因区间）、`blacklist`、`effective_genome_size` |
 | `contamination` | 污染检查：`enabled: true`，`genome` 默认 `hg38`。**本机目前没有人的 bowtie2 index**，打开前需先构建并填入 `references.hg38.bowtie2_index` |
 | `filter.mapq` | 默认 30 |
 | `filter.remove_mito` | 默认 false |
@@ -127,7 +127,7 @@ blacklist 的来源和下载记录见 `~/reference/blacklist/download.log`。
 project/
 ├── samples.tsv
 ├── results/
-│   ├── qc/report.html                   # ★ QC 报告（单文件）：概览、流程与参数、QC 汇总表、重复一致性；指标说明与参考值见 workflow/report/qc_metrics.yaml
+│   ├── qc/report.html                   # ★ QC 报告（单文件）：概览、流程与参数、QC 汇总表、重复一致性、信号 profile；指标说明与参考值见 workflow/report/qc_metrics.yaml
 │   ├── qc/summary.tsv                   # 每个样本的 reads 数、比对率、重复率、peak 数、FRiP 等（纯数字）
 │   ├── 03_peaks/{sample}.narrowPeak     # ★ 已去除 blacklist 的 peak（broad 样本为 .broadPeak）
 │   ├── 03_peaks/macs3/{sample}/         # macs3 原始输出（xls、summits 等）
@@ -145,7 +145,8 @@ project/
 │       ├── reference_check.txt          # index、blacklist、GTF 染色体命名检查
 │       ├── replicates/                  # 重复一致性：samples.tsv、groups.tsv、peak_overlap.tsv、peak_venn.tsv、group_venn.tsv、correlation.tsv、log2cpm.tsv、pca.tsv、
 │       │                                #   peak_counts.tsv（consensus peak 计数矩阵）、diffbind.rds（DBA 对象，可接着做差异分析）；figures/ 下为 PDF、PNG（300 dpi）、SVG
-│       └── fastqc_*/  frip/  deeptools/  contamination/
+│       ├── deeptools/                   # fingerprint、tss_profile、metagene_samples / metagene_groups（meta gene profile；PNG、TSV、matrix）
+│       └── fastqc_*/  frip/  contamination/
 └── logs/
     └── run_<时间>/                    # 每执行一次 snakemake 新建一个；续跑时只含这次实际跑了的任务
         ├── <步骤>/<样本>.log          # 出错时先看这里

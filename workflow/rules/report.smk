@@ -12,6 +12,20 @@ def qc_files():
     return d
 
 
+def profile_files():
+    """QC 报告「信号 profile」一节：deeptools plotProfile 的 PNG 及基因数（bed），由 config 控制。"""
+    d = {}
+    if config["qc"]["tss_profile"]:
+        d["prof_tss"] = "results/qc/deeptools/tss_profile.png"
+        d["prof_tss_bed"] = "results/reference/tss.bed"
+    if config["qc"]["metagene_profile"]:
+        d["prof_samples"] = "results/qc/deeptools/metagene_samples.png"
+        d["prof_genes"] = "results/reference/genes.bed"
+        if BW_GROUP["enabled"] and BW_GROUPS:
+            d["prof_groups"] = "results/qc/deeptools/metagene_groups.png"
+    return d
+
+
 def trim_report(s, r):
     return f"results/01_trim/reports/{s}_{r}.fastq.gz_trimming_report.txt"
 
@@ -151,6 +165,9 @@ def report_settings():
         ("组 bigwig", "Group bigwig", *group_bigwig_desc()),
         ("TSS profile", "TSS profile", f"`{c['qc']['tss_matrix']}`" if c["qc"]["tss_profile"] else "不计算",
          f"`{c['qc']['tss_matrix']}`" if c["qc"]["tss_profile"] else "disabled"),
+        ("Meta gene profile", "Meta gene profile",
+         f"`{c['qc']['metagene_matrix']}`；protein_coding 基因，长度 ≥ {c['qc']['metagene_min_length']} bp" if c["qc"]["metagene_profile"] else "不计算",
+         f"`{c['qc']['metagene_matrix']}`; protein_coding genes ≥ {c['qc']['metagene_min_length']} bp" if c["qc"]["metagene_profile"] else "disabled"),
         ("污染检查", "Contamination", f"比对到 {CONTAM['genome']}" if CONTAM["enabled"] else "不检查",
          f"aligned to {CONTAM['genome']}" if CONTAM["enabled"] else "disabled"),
         ("motif", "motif", "HOMER（narrow、非对照样本）" if c["motif"]["enabled"] else "不分析",
@@ -182,6 +199,7 @@ rule qc_report:
     """单文件 HTML 报告：概览、流程与参数、QC 汇总表（指标说明与参考值见 workflow/report/qc_metrics.yaml）。"""
     input:
         unpack(lambda wc: replicate_report_inputs()),
+        unpack(lambda wc: profile_files()),
         summary="results/qc/summary.tsv",
         multiqc="results/qc/multiqc/multiqc_report.html",
         metrics=workflow.source_path("../report/qc_metrics.yaml"),
@@ -196,6 +214,13 @@ rule qc_report:
         qvalue=config["macs3"]["qvalue"],
         multiqc="multiqc/multiqc_report.html",  # 相对 report.html 的路径
         rep_figures=replicate_figures() if replicates_on() else [],
+        profile=dict(
+            tss=config["qc"]["tss_matrix"],
+            metagene=config["qc"]["metagene_matrix"],
+            min_len=config["qc"]["metagene_min_length"],
+            norm=config["bigwig"]["normalize"],
+            group_method=BW_GROUP["method"],
+        ),
     log:
         "<logs>/qc_report.log",
     localrule: True
