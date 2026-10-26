@@ -99,6 +99,23 @@ rule multiqc:
 
 
 
+def group_bigwig_desc():
+    """QC 报告中组 bigwig 的说明：(中文, 英文)。"""
+    if not BW_GROUP["enabled"]:
+        return "不生成", "disabled"
+    if BW_GROUP["method"] == "merge":
+        zh, en = "合并组内去重后的 BAM 再 `bamCoverage`（参数同上）", "dedup BAMs of each group merged, then `bamCoverage` (same options)"
+    else:
+        zh, en = "各重复的 bigwig 逐 bin 取平均（`bigwigAverage`）", "replicate bigwigs averaged per bin (`bigwigAverage`)"
+    zh += f"；{len(BW_GROUPS)} 个组"
+    en += f"; {len(BW_GROUPS)} groups"
+    excluded = SAMPLES_DF.index[SAMPLES_DF["merge"] == "no"].tolist()
+    if excluded:
+        zh += "；不参与合并：" + "、".join(excluded)
+        en += "; excluded: " + ", ".join(excluded)
+    return zh, en
+
+
 def report_settings():
     """QC 报告「流程与参数」中的参数表：(中文名, 英文名, 中文取值, 英文取值)，取值中 `...` 显示为代码。"""
     c, ref, m = config, REF, config["macs3"]
@@ -110,7 +127,7 @@ def report_settings():
     types_en = ", ".join(f"{v} ({n})" for v, n in ip["peak_type"].value_counts().items())
     mito_zh = f"去掉 {MITO}" if REMOVE_MITO else f"保留 {MITO}"
     mito_en = f"{MITO} removed" if REMOVE_MITO else f"{MITO} kept"
-    return [
+    rows = [
         ("样本数", "Samples", f"{len(SAMPLES)}（IP {len(PEAK_SAMPLES)}，对照 {len(CONTROLS)}；SE {n_se}，PE {n_pe}）",
          f"{len(SAMPLES)} (IP {len(PEAK_SAMPLES)}, control {len(CONTROLS)}; SE {n_se}, PE {n_pe})"),
         ("peak 类型", "Peak type", types, types_en),
@@ -131,6 +148,7 @@ def report_settings():
          f"q < {m['qvalue']}; with control `{m['chip_control']}`; without `{m['chip_no_control']}`; broad adds `{m['broad']}`"),
         ("bigwig", "bigwig", f"`--binSize {b['binsize']} --normalizeUsing {b['normalize']}`，排除 blacklist",
          f"`--binSize {b['binsize']} --normalizeUsing {b['normalize']}`, blacklist excluded"),
+        ("组 bigwig", "Group bigwig", *group_bigwig_desc()),
         ("TSS profile", "TSS profile", f"`{c['qc']['tss_matrix']}`" if c["qc"]["tss_profile"] else "不计算",
          f"`{c['qc']['tss_matrix']}`" if c["qc"]["tss_profile"] else "disabled"),
         ("污染检查", "Contamination", f"比对到 {CONTAM['genome']}" if CONTAM["enabled"] else "不检查",
@@ -138,11 +156,32 @@ def report_settings():
         ("motif", "motif", "HOMER（narrow、非对照样本）" if c["motif"]["enabled"] else "不分析",
          "HOMER (narrow, non-control samples)" if c["motif"]["enabled"] else "disabled"),
     ]
+    r = REPLICATES
+    if replicates_on():
+        lo, hi = r["y_frac"]
+        sex_zh = (f"；性别（含对照）按 chrY 计数区 `{REF['y_region']}`（chrY 去掉 PAR）的 reads 占全部比对 reads 的比例判定"
+                  f"（< {lo}% 雌性，> {hi}% 雄性）" if r["sex_check"] else "")
+        sex_en = (f"; sex (controls included) called from the fraction of mapped reads in the chrY region `{REF['y_region']}` "
+                  f"(chrY without the PAR; < {lo}% female, > {hi}% male)" if r["sex_check"] else "")
+        rows.append((
+            "重复一致性", "Replicates",
+            f"IP 样本 {len(GROUPS)} 组（{len(REP_GROUPS)} 组有 ≥ 2 个重复）；reproducible peak 至少出现在 {r['min_reps']} 个重复中；"
+            f"consensus peak 由 DiffBind 得到（组内 consensus 取并集，" + (f"峰顶 ± {diffbind_summits()} bp" if diffbind_summits() else "原宽度") + "）；"
+            f"IP 计数的 log2(CPM + 1)（不扣除 input），{r['method']} 相关，PCA 取方差最大的 {r['pca_top']} 个 peak" + sex_zh,
+            f"IP samples in {len(GROUPS)} groups ({len(REP_GROUPS)} with ≥ 2 replicates); reproducible peaks in ≥ {r['min_reps']} replicates; "
+            f"consensus peaks from DiffBind (union of within-group consensus sets, " + (f"summit ± {diffbind_summits()} bp" if diffbind_summits() else "merged widths") + "); "
+            f"log2(CPM + 1) of IP counts (input not subtracted), {r['method']} correlation, "
+            f"PCA on the {r['pca_top']} most variable peaks" + sex_en,
+        ))
+    else:
+        rows.append(("重复一致性", "Replicates", "不分析", "disabled"))
+    return rows
 
 
 rule qc_report:
     """单文件 HTML 报告：概览、流程与参数、QC 汇总表（指标说明与参考值见 workflow/report/qc_metrics.yaml）。"""
     input:
+        unpack(lambda wc: replicate_report_inputs()),
         summary="results/qc/summary.tsv",
         multiqc="results/qc/multiqc/multiqc_report.html",
         metrics=workflow.source_path("../report/qc_metrics.yaml"),
@@ -156,6 +195,7 @@ rule qc_report:
         settings=report_settings(),
         qvalue=config["macs3"]["qvalue"],
         multiqc="multiqc/multiqc_report.html",  # 相对 report.html 的路径
+        rep_figures=replicate_figures() if replicates_on() else [],
     log:
         "<logs>/qc_report.log",
     localrule: True

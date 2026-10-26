@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-扫描 fastq 目录生成 samples.tsv（sample / fq1 / fq2 + 可选的空白附加列）。
+扫描 fastq 目录生成 samples.tsv（sample / fq1 / fq2 + 可选的 group 列和空白附加列）。
 
 识别的文件名（.fastq.gz 或 .fq.gz）:
   X_1 / X_2,  X_R1 / X_R2,  X_R1_001 / X_R2_001,  X.R1 / X.R2   -> 双端 X
   其它                                                        -> 单端，样本名为去掉后缀的文件名
 只有 _1 没有 _2（或反之）、或 _1/_2 的首条 read 名不一致（说明是两个单端重复）时，
 按单端处理并保留完整文件名作为样本名。
+--group 时增加 group 列：样本名去掉末尾的 _repN（不区分大小写），如 Naive_rep1 -> Naive。
 
-用法: make_samplesheet.py -i <fq_dir> -o samples.tsv [--extra-cols strandedness,protocol,umi]
+用法: make_samplesheet.py -i <fq_dir> -o samples.tsv [--group] [--extra-cols strandedness,protocol,umi]
 """
 import argparse
 import gzip
@@ -18,6 +19,11 @@ from pathlib import Path
 
 SUFFIX = re.compile(r"\.(fastq|fq)\.gz$")
 MATE = re.compile(r"^(?P<stem>.+?)[._](?P<r>R?[12])(?P<tail>_001)?$")
+REP = re.compile(r"[._-]?rep\d+$", re.I)  # 与 workflow/rules/common.smk 一致
+
+
+def infer_group(sample):
+    return REP.sub("", sample) or sample
 
 
 def first_read_id(path):
@@ -31,6 +37,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-i", "--input", required=True, help="fastq 所在目录（不递归）")
     ap.add_argument("-o", "--output", required=True, help="输出 samples.tsv")
+    ap.add_argument("--group", action="store_true", help="增加 group 列（按样本名推断）")
     ap.add_argument("--extra-cols", default="", help="额外的空白列，逗号分隔")
     args = ap.parse_args()
 
@@ -65,10 +72,12 @@ def main():
         sys.exit(f"错误: 样本名重复 {dup}（同一目录中可能同时存在 X.fq.gz 与 X.fastq.gz）")
 
     extra = [c for c in args.extra_cols.split(",") if c]
+    group = ["group"] if args.group else []
     with open(args.output, "w") as f:
-        f.write("\t".join(["sample", "fq1", "fq2", *extra]) + "\n")
+        f.write("\t".join(["sample", "fq1", "fq2", *group, *extra]) + "\n")
         for s, fq1, fq2 in rows:
-            f.write("\t".join([s, str(fq1), str(fq2), *[""] * len(extra)]) + "\n")
+            g = [infer_group(s)] if args.group else []
+            f.write("\t".join([s, str(fq1), str(fq2), *g, *[""] * len(extra)]) + "\n")
     n_pe = sum(1 for r in rows if r[2])
     print(f"已生成 {args.output}: {len(rows)} 个样本（PE {n_pe}，SE {len(rows) - n_pe}）", file=sys.stderr)
 

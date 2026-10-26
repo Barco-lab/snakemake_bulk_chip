@@ -46,6 +46,13 @@ samtools_sort_mem: 2G        # samtools sort 每线程内存
 #   fasta : HOMER motif 使用
 #   gtf   : 生成 TSS 用于 TSS profile / enrichment
 #   fasta / gtf 与 RNA 流程同源（Ensembl，命名为 1 / MT），使用时自动与 index 命名（chr1 / chrM）互转
+#   chrX / y_region : 性别检查用（index 命名），见 replicates.sex_check
+#     y_region 为 chrY 上计数的区域 = chrY 去掉 PAR（拟常染色体区，X / Y 上序列相同，雌性 reads 也会比对上）后的部分
+#       mm10 : PAR 为 chrY:90745845-91644698（UCSC），PAR 起点上游约 10 kb 处雌性样本也有大量 reads，
+#              故截在 90 Mb（距 PAR 约 745 kb 余量，按实测数据定的经验值，非注释）
+#       hg38 : PAR1 为 chrY:10001-2781479，PAR2 为 chrY:56887903-57217415（UCSC），取两者之间
+#     该区域并非只含 Y 特有序列：仍有与 chrX 同源的扩增序列（小鼠 Sly / Ssty 与 X 上的 Slx / Sstx，人的 XTR），
+#     经 filter.mapq 过滤后雌性样本仍有少量 reads（mm10 实测约占全部比对 reads 的 0.0001%–0.0007%），故按阈值判定
 # ---------------------------------------------------------------------
 references:
   mm10:
@@ -54,12 +61,16 @@ references:
     gtf: /data/genome/release-100/Mus_musculus.GRCm38.100.gtf
     blacklist: /home/LAB/lab_ab_1/reference/blacklist/mm10-blacklist.v2.bed.gz
     effective_genome_size: 2652783500
+    chrX: chrX
+    y_region: "chrY:1-90000000"                  # chrY 去掉 PAR 及其上游约 745 kb
   hg38:
     bowtie2_index: ""        # 本机暂无，需要时自行构建（bowtie2-build）后填写
     fasta: /data/genome/Homo_sapiens.GRCh38.dna.primary_assembly.fa
     gtf: /data/genome/release-100/Homo_sapiens.GRCh38.100.gtf
     blacklist: /home/LAB/lab_ab_1/reference/blacklist/hg38-blacklist.v2.bed.gz
     effective_genome_size: 2913022398
+    chrX: chrX
+    y_region: "chrY:2781480-56887902"            # PAR1 与 PAR2 之间（UCSC hg38）
 
 # ---------------------------------------------------------------------
 # 各步骤参数
@@ -86,16 +97,38 @@ bigwig:
   normalize: RPGC         # RPGC | CPM | RPKM | BPM | None
   se_fragment_length: 200  # SE 数据 --extendReads 的长度
   extra: ""
+  # 每组一个 bigwig（results/04_bigwig/groups/{group}.bw），单样本的 bigwig 照常生成
+  #   只做IP 样本的组（对照不合并）；样本表 merge 列为 no 的重复不参与，剩下 ≥ 2 个重复的组才生成
+  group:
+    enabled: true
+    method: merge          # merge：合并组内去重后的 BAM 再 bamCoverage（参数同上；reads 多的重复权重大）
+                           # mean ：各重复的 bigwig 逐 bin 取平均（bigwigAverage；每个重复权重相同）
 
 qc:
   tss_profile: true        # TSS profile 与 TSS enrichment
   # computeMatrix 命令（-S / -R / --samplesLabel / -p / -o 由流程补上）
   tss_matrix: "computeMatrix reference-point -a 3000 -b 3000 --binSize 50 --skipZeros"
 
+# 重复一致性（QC 报告「重复一致性」一节），只比较 IP 样本（被用作 control 的样本不参与）
+#   分组见 samples.tsv 的 group 列，为空时按样本名去掉 _repN 推断；同一组的 IP 样本 peak_type 须一致
+replicates:
+  enabled: true
+  min_reps: 2              # reproducible peak：在组内至少几个重复中出现（组内只有 2 个重复时即两者都有）
+  # consensus peak 与计数用 DiffBind：组内 consensus（dba.peakset，至少 min_reps 个重复）-> 各组并集 -> dba.count
+  summits: 200             # dba.count 以峰顶 ± summits bp 计数（固定宽度）；有 broad 的组时自动不用；false 保留原宽度
+  method: pearson          # pearson | spearman；基于 consensus peak 上 IP 计数的 log2(CPM + 1)（不扣除 input）
+  pca_top: 500             # PCA 使用方差最大的 peak 数
+  # 性别（所有样本，含 control）：chrX、chrY 的 reads 占全部比对 reads（过滤去重后的 BAM）的比例
+  #   chrY 只统计 references 中的 y_region（chrY 去掉 PAR），按 y_frac 阈值判定
+  #   chrX 占比随抗体、细胞类型变化，只在组内比较、不用于判定；input 为全基因组 DNA，其 chrX 占比直接反映 X 拷贝数
+  sex_check: true
+  y_frac: [0.002, 0.01]    # y_region reads 占全部比对 reads 的百分比：< 0.002% 判为雌性，> 0.01% 判为雄性，之间无法判断
+                           # （阈值按 ATAC 雌性数据定，未用雄性样本验证）
+
 motif:
   enabled: false           # HOMER，仅对 narrow peak 的非 control 样本
   size: 200                # summit ± size/2
-  params: ""               # 如 "-nomotif" 只做已知 motif，速度快很多
+  params: "-nomotif"       # 默认只做已知 motif；改为 "" 同时做 de novo（长度 8/10/12，每个样本约 1–2 小时）
 
 keep:
   trimmed_fastq: false     # false 时 trim 后的 fastq 在比对完成后自动删除

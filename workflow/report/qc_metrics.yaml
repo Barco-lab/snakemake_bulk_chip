@@ -111,6 +111,65 @@ metrics:
     ref: {zh: 无统一标准，与同批样本比较, en: No consensus threshold; compare within the batch}
     outlier: true
 
+# 「重复一致性」一节的表格列（results/qc/replicates/samples.tsv、groups.tsv）；检查规则写在 qc_report.py 中
+replicates:
+  group:
+    desc: {zh: samples.tsv 的 group 列；为空时按样本名去掉 _repN 推断, en: group column of samples.tsv; inferred by removing _repN from the sample name when empty}
+  role:
+    desc: {zh: "IP：参与重复一致性比较；control：被用作对照的样本，只做性别检查", en: "IP: compared for replicate consistency; control: used as a control, sex check only"}
+  n_samples:
+    desc: {zh: 组内 IP 样本数, en: IP samples in the group}
+  peaks:
+    desc: {zh: 该样本的 peak 数（已去除 blacklist）, en: Peaks of the sample (blacklist removed)}
+  median_peaks:
+    desc: {zh: 组内各样本 peak 数的中位数, en: Median peaks per sample in the group}
+  reproducible_peaks:
+    desc:
+      zh: DiffBind 组内 consensus（dba.peakset）：各重复的 peak ≥ 1 bp 重叠即合并，至少在 replicates.min_reps 个重复中出现的区域数
+      en: "DiffBind within-group consensus (dba.peakset): peaks overlapping by ≥ 1 bp are merged; regions present in at least replicates.min_reps replicates"
+    ref:
+      zh: 思路同 ENCODE histone 流程的 naive overlap；ENCODE TF 标准用 IDR 与 pseudo-replicate（rescue / self-consistency ratio < 2），本流程未计算
+      en: Same idea as the naive overlap of the ENCODE histone pipeline; the ENCODE TF standard uses IDR with pseudo-replicates (rescue / self-consistency ratio < 2), not computed here
+    sources: [ENCODE-histone, ENCODE-TF]
+  median_jaccard:
+    desc: {zh: 组内两两重复 peak 的 Jaccard 指数（交集 / 并集，按碱基）的中位数, en: Median pairwise Jaccard index (intersection / union in bp) of replicate peaks}
+    ref: {zh: 无统一阈值；随 peak 数和测序深度变化，主要用于组间、批次间比较, en: No consensus threshold; depends on peak numbers and depth, so compare across groups and batches}
+    digits: 3
+  min_jaccard:
+    desc: {zh: 组内两两重复 Jaccard 的最小值, en: Lowest pairwise Jaccard in the group}
+    digits: 3
+  mean_within_cor:
+    desc: {zh: 组内样本 within_cor 的平均值, en: Mean within_cor of the group}
+    digits: 3
+  within_cor:
+    desc:
+      zh: 与同组其他重复的平均相关系数（consensus peak 上 IP 计数的 log2(CPM + 1)，不扣除 input；方法见 replicates.method）
+      en: Mean correlation with the other replicates of the group (log2(CPM + 1) of IP counts on consensus peaks, input not subtracted; method in replicates.method)
+    ref: {zh: ENCODE ChIP-seq 标准未设样本间相关性阈值；与同批样本比较, en: No sample correlation threshold in the ENCODE ChIP-seq standards; compare within the batch}
+    digits: 3
+  max_other_cor:
+    desc: {zh: 与其他组样本的最高相关系数（括号内为该样本）, en: Highest correlation with a sample of another group (that sample in brackets)}
+    digits: 3
+  mean_jaccard:
+    desc: {zh: 与同组其他重复 peak 的平均 Jaccard 指数, en: Mean Jaccard index with the other replicates of the group}
+    digits: 3
+  y_frac:
+    desc:
+      zh: chrY 计数区（references 中的 y_region，即 chrY 去掉 PAR）的 reads 占全部比对 reads 的百分比
+      en: Reads in the chrY counting region (references y_region, i.e. chrY without the PAR) as a percentage of all mapped reads
+    ref:
+      zh: 小于 replicates.y_frac 下限判为雌性，大于上限判为雄性；该区域仍含与 chrX 同源的序列，雌性也不为 0
+      en: Below the lower replicates.y_frac bound is female, above the upper bound male; the region still holds X-homologous sequence, so females are not 0
+    digits: 5
+  x_frac:
+    desc: {zh: chrX 的 reads 占全部比对 reads 的百分比, en: Reads on chrX as a percentage of all mapped reads}
+    ref:
+      zh: IP 样本随抗体、细胞类型变化，不用于判定；input 为全基因组 DNA，反映 X 拷贝数。明显低于同组中位数（> 3 × MAD）时提示
+      en: Varies with antibody and cell type in IP samples, so not used for the call; in input DNA it reflects X copy number. Flagged when well below the group median (> 3 × MAD)
+    digits: 2
+  sex:
+    desc: {zh: 推断的性别：F / M / undetermined, en: "Inferred sex: F / M / undetermined"}
+
 sources:
   ENCODE-TF:
     name: ENCODE TF ChIP-seq data standards

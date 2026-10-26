@@ -18,6 +18,7 @@ fastq ─► trim_galore ─► bowtie2 ─► filtering (MAPQ≥30, properly pa
                                                                              ├─► fingerprint, samtools stats (fragment length)
                                                                              └─► HOMER motif (optional)
                                      Optional: contamination check (alignment to another species)
+                                     Replicates (IP samples): peak reproducibility, consensus-peak correlation and PCA; sex (fraction of reads on chrX / chrY, controls included)
                                      Summary: summary.tsv + QC report + MultiQC
 ```
 
@@ -41,9 +42,10 @@ bash $P/run.sh -c config.yaml -i /path/to/rawdata -o chipseq_out -n
 nohup bash $P/run.sh -c config.yaml -o chipseq_out -j 48 -y > run.log 2>&1 &
 ```
 
-Fill in control / peak_type in samples.tsv.
+Fill in control / peak_type in samples.tsv and check group.
 
-- No environment needs to be activated: `run.sh` calls snakemake from `~/.conda/envs/omics` (use `SMK_ENV=<env path>` for another environment); macs3 and deeptools also use the `omics` environment.
+- No environment needs to be activated: `run.sh` calls snakemake from `~/.conda/envs/omics` (use `SMK_ENV=<env path>` for another environment); macs3 and deeptools also use the `omics` environment;
+  the replicate figures are drawn with R (ggplot2) from `in202506`.
 - There is one copy of the pipeline code shared by all projects; **each project passes its own config with `-c` (required)**.
   The pipeline reads the default `config/config.yaml` first and then overrides it with the `-c` file (nested keys are merged level by level), so a project config only needs the parameters that differ from the defaults.
   The merged configuration actually used by each run is archived in `<outdir>/logs/run_<time>/config.yaml`.
@@ -58,17 +60,21 @@ Fill in control / peak_type in samples.tsv.
 ## Input: samples.tsv
 
 ```
-sample        fq1                      fq2                      control     peak_type
-H3K4me3_rep1  /data/K4_rep1_1.fq.gz    /data/K4_rep1_2.fq.gz    input_rep1
-H3K27me3_rep1 /data/K27_rep1_1.fq.gz   /data/K27_rep1_2.fq.gz   input_rep1  broad
-input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz
+sample        fq1                      fq2                      group     control     peak_type
+H3K4me3_rep1  /data/K4_rep1_1.fq.gz    /data/K4_rep1_2.fq.gz    H3K4me3   input_rep1
+H3K4me3_rep2  /data/K4_rep2_1.fq.gz    /data/K4_rep2_2.fq.gz    H3K4me3   input_rep2
+H3K27me3_rep1 /data/K27_rep1_1.fq.gz   /data/K27_rep1_2.fq.gz   H3K27me3  input_rep1  broad
+input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz input
+input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 ```
 
 | Column | Description |
 |---|---|
 | `fq2` | Empty means single-end. Recognises `_1/_2`, `_R1/_R2`, `_R1_001/_R2_001` |
 | `control` | input / IgG control of the ChIP, given as **the name of another sample in the sheet**.<br>Samples used as a control are only aligned, QC'd and turned into bigwigs; no peaks are called for them.<br>Leave empty to run without a control (using the old `--nolambda` options). |
-| `peak_type` | `narrow` or `broad`; empty uses `peak_type` from the config (default narrow) |
+| `peak_type` | `narrow` or `broad`; empty uses `peak_type` from the config (default narrow). Must be the same for the IP samples of a group |
+| `group` | Optional group a replicate belongs to, used for the replicate analysis; when the column is missing or empty the group is inferred by removing a trailing `_repN` from the sample name (`run.sh -i` fills it in; edit as needed).<br>Only IP samples are compared; the group of a control sample is used for the sex check only |
+| `merge` | Optional, whether the replicate goes into the group bigwig: empty or `yes` to include, `no` to leave it out (e.g. a replicate flagged by the replicate QC). Only affects the group bigwig, not the reproducible / consensus peaks or the replicate analysis |
 
 ---
 
@@ -81,6 +87,7 @@ input_rep1    /data/input_rep1_1.fq.gz /data/input_rep1_2.fq.gz
 | mitochondria | kept by default (removed with `filter.remove_mito: true`); summary reports `mito_rate (chrM) (% of mapped)` |
 | macs3 | with control: `-c control --keep-dup all`<br>without control: `--nomodel --nolambda --extsize 200 --min-length 100`<br>broad: `--broad --broad-cutoff 0.1`; `-f BAMPE` for PE |
 | QC | FRiP, fingerprint, TSS profile / enrichment, fragment length distribution |
+| replicates | IP samples only. Pairwise Jaccard of replicate peaks and Venn diagrams of the bases covered by each replicate combination (bedtools multiinter, groups of 2–4 replicates); within-group consensus sets from DiffBind (reproducible peaks present in ≥ 2 replicates), merged across groups into consensus peaks and counted with `dba.count` on IP reads (input not subtracted; summit ± 200 bp for narrow, merged widths when broad groups are present), log2(CPM + 1) for correlation, clustering and PCA; sex of every sample (controls included) inferred from the fraction of mapped reads on chrX and chrY (called from the chrY region; chrX only compared within groups) |
 
 Other settings:
 - filtering keeps MAPQ ≥ 30 and removes secondary, supplementary and unmapped reads; PE keeps properly paired reads with both mates passing;
@@ -100,8 +107,11 @@ Other settings:
 | `filter.remove_mito` | Default false |
 | `macs3.qvalue` | Default 0.01 |
 | `bigwig.normalize` | `RPGC` (default) / `CPM` / `RPKM` / `BPM` / `None`; `bigwig.binsize` defaults to 10 |
-| `motif.enabled` | HOMER, only for non-control samples with narrow peaks; `motif.params: "-nomotif"` runs known motifs only and is much faster |
+| `bigwig.group` | One bigwig per group (IP groups only, controls are not merged), on by default; `method: merge` (default) merges the group's dedup BAMs and runs `bamCoverage`, `mean` averages the replicate bigwigs with `bigwigAverage` (equal weight per replicate). Only groups with ≥ 2 replicates left after `merge: no` are made.<br>You can first run with `enabled: false`, check the replicate QC, fill in the `merge` column, set `true` and run again: only the merging step is added. Changing the `merge` column later only redoes the affected groups |
+| `motif.enabled` | HOMER, only for non-control samples with narrow peaks; `motif.params` defaults to `"-nomotif"` (known motifs only); set it to `""` to add de novo motifs (lengths 8/10/12, much slower) |
 | `keep.raw_bam` | Default false: only the filtered, deduplicated BAM is kept |
+| `replicates` | Replicate consistency: `enabled`; `min_reps` (replicates a reproducible peak must appear in, default 2); `summits` (DiffBind counts the summit ± this many bp, default 200; not used when broad groups are present); `method` (`pearson` / `spearman`); `pca_top` (default 500); `sex_check` and `y_frac` (default `[0.002, 0.01]`: reads in the chrY region as a percentage of all mapped reads < 0.002% female, > 0.01% male) |
+| `references.<genome>.y_region` | chrY region counted for the sex check, i.e. chrY without the pseudoautosomal region (PAR, identical on X and Y): `chrY:1-90000000` for mm10 (the PAR is chrY:90745845-91644698; females also have many reads just upstream of it, so a further ~745 kb is left out), between PAR1 and PAR2 for hg38 (`chrY:2781480-56887902`). The region still contains X-homologous ampliconic sequence, so female samples carry a few reads and the call uses thresholds |
 
 Chromosome naming of the references: the bowtie2 mm10 index and the blacklist use UCSC names (`chr1`); the fasta / gtf come from the same source as the RNA pipeline
 (Ensembl release-100 under `/data/genome`, named `1` / `MT`), and names are converted automatically when building the TSS set and the HOMER input.
@@ -116,11 +126,14 @@ The source and download record of the blacklist are in `~/reference/blacklist/do
 project/
 ├── samples.tsv
 ├── results/
-│   ├── qc/report.html                   # ★ QC report (single file): overview, workflow & parameters, QC summary; definitions and references in workflow/report/qc_metrics.yaml
+│   ├── qc/report.html                   # ★ QC report (single file): overview, workflow & parameters, QC summary, replicate consistency; definitions and references in workflow/report/qc_metrics.yaml
 │   ├── qc/summary.tsv                   # reads, mapping rate, duplicate rate, peaks, FRiP, etc. per sample (plain numbers)
 │   ├── 03_peaks/{sample}.narrowPeak     # ★ peaks with blacklist regions removed (.broadPeak for broad samples)
 │   ├── 03_peaks/macs3/{sample}/         # raw macs3 output (xls, summits, etc.)
+│   ├── 03_peaks/reproducible/{group}.bed  # peaks present in at least min_reps replicates (column 4: number of replicates)
+│   ├── 03_peaks/consensus.bed           # union of the reproducible peaks of all groups (DiffBind; summit ± summits bp for narrow)
 │   ├── 04_bigwig/{sample}.bw            # ★
+│   ├── 04_bigwig/groups/{group}.bw      # ★ merged bigwig per group
 │   ├── 05_motif/{sample}/               # HOMER (optional)
 │   ├── 02_align/{sample}.dedup.bam      # filtered, deduplicated BAM ({sample}.raw.bam is the raw bowtie2 alignment); stats/ holds flagstat, idxstats, markdup, samtools stats
 │   ├── 01_trim/reports/                 # trim_galore reports
@@ -129,6 +142,8 @@ project/
 │       ├── multiqc/multiqc_report.html  # ★ all QC in one report
 │       ├── bowtie2/{sample}.log         # alignment statistics
 │       ├── reference_check.txt          # chromosome naming check of index, blacklist and GTF
+│       ├── replicates/                  # replicate consistency: samples.tsv, groups.tsv, peak_overlap.tsv, peak_venn.tsv, correlation.tsv, pca.tsv,
+│       │                                #   peak_counts.tsv (consensus peak count matrix), diffbind.rds (DBA object for differential analysis); figures/ holds PDF, PNG (300 dpi) and SVG
 │       └── fastqc_*/  frip/  deeptools/  contamination/
 └── logs/
     └── run_<time>/                    # one per snakemake run; a resumed run only contains the jobs it actually ran

@@ -47,6 +47,14 @@ RENAME_CHROMS = str(Path(workflow.basedir) / "scripts/rename_chroms.awk")
 # ============================================================
 # 样本表
 # ============================================================
+REP_SUFFIX = re.compile(r"[._-]?rep\d+$", re.I)  # 与 make_samplesheet.py 一致
+
+
+def infer_group(sample):
+    """group 列为空时按样本名推断：去掉末尾的 _repN，如 Naive_rep1 -> Naive。"""
+    return REP_SUFFIX.sub("", sample) or sample
+
+
 def load_samples(path):
     path = Path(path)
     if not path.exists():
@@ -56,11 +64,13 @@ def load_samples(path):
     for col in ("sample", "fq1"):
         if col not in df.columns:
             raise ValueError(f"样本表缺少必需列 '{col}': {path}")
-    for col in ("fq2", "control", "peak_type"):
+    for col in ("fq2", "control", "peak_type", "group", "merge"):
         if col not in df.columns:
             df[col] = ""
     df = df.apply(lambda c: c.str.strip())
     df["peak_type"] = df["peak_type"].replace("", config["peak_type"])
+    df["group"] = [g or infer_group(s) for s, g in zip(df["sample"], df["group"])]
+    df["merge"] = df["merge"].str.lower()
 
     errors = []
     dup = df.loc[df["sample"].duplicated(), "sample"].tolist()
@@ -69,7 +79,17 @@ def load_samples(path):
     for s in df["sample"]:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", s):
             errors.append(f"样本名只能包含字母、数字、. _ -（且不能以符号开头）: '{s}'")
+    for g in df["group"].unique():
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", g):
+            errors.append(f"group 只能包含字母、数字、. _ -（且不能以符号开头）: '{g}'")
+    # 同一组的 IP 样本 peak 类型须一致（reproducible peak 按组合并）
+    ip = df[~df["sample"].isin(set(df["control"]) - {""})]
+    for g, sub in ip.groupby("group", sort=False):
+        if sub["peak_type"].nunique() > 1:
+            errors.append(f"group '{g}' 中的 IP 样本 peak_type 不一致: {dict(zip(sub['sample'], sub['peak_type']))}")
     for _, r in df.iterrows():
+        if r["merge"] not in ("", "yes", "no"):
+            errors.append(f"{r['sample']}: merge='{r['merge']}' 无效，可选 yes / no（留空即 yes）")
         if r["peak_type"] not in ("narrow", "broad"):
             errors.append(f"{r['sample']}: peak_type='{r['peak_type']}' 无效，可选 narrow / broad")
         if r["control"]:
@@ -100,6 +120,20 @@ SE_SAMPLES = [s for s in SAMPLES if not SAMPLES_DF.loc[s, "fq2"]]
 # 被别的样本当作 control 的样本只做比对和 QC，不单独 call peak
 CONTROLS = sorted(set(SAMPLES_DF["control"]) - {""})
 PEAK_SAMPLES = [s for s in SAMPLES if s not in CONTROLS]
+# 分组（按样本表中首次出现的顺序），只含 IP 样本；REP_GROUPS 为有 ≥ 2 个重复的组。control 的组只用于性别检查
+GROUPS = {
+    g: [s for s in PEAK_SAMPLES if SAMPLES_DF.loc[s, "group"] == g]
+    for g in SAMPLES_DF.loc[PEAK_SAMPLES, "group"].unique()
+}
+REP_GROUPS = [g for g, ss in GROUPS.items() if len(ss) >= 2]
+REPLICATES = config["replicates"]
+
+# 组 bigwig：组内 merge 列不为 no 的 IP 样本，≥ 2 个时才生成
+BW_GROUP = config["bigwig"]["group"]
+if BW_GROUP["method"] not in ("merge", "mean"):
+    raise ValueError(f"bigwig.group.method='{BW_GROUP['method']}' 无效，可选 merge / mean")
+BW_GROUPS = {g: [s for s in ss if SAMPLES_DF.loc[s, "merge"] != "no"] for g, ss in GROUPS.items()}
+BW_GROUPS = {g: ss for g, ss in BW_GROUPS.items() if len(ss) >= 2}
 
 
 def regex_of(names):
@@ -109,6 +143,7 @@ def regex_of(names):
 
 wildcard_constraints:
     sample=regex_of(SAMPLES),
+    group=regex_of(list(GROUPS)),
     read="R1|R2",
     ptype="narrow|broad",
 
@@ -152,6 +187,11 @@ def all_targets():
         t.append(peak_file(s))
         if config["motif"]["enabled"] and SAMPLES_DF.loc[s, "peak_type"] == "narrow":
             t.append(f"results/05_motif/{s}/knownResults.txt")
+    if BW_GROUP["enabled"]:
+        t += expand("results/04_bigwig/groups/{group}.bw", group=BW_GROUPS)
+    if replicates_on():
+        t += expand("results/03_peaks/reproducible/{group}.bed", group=REP_GROUPS)
+        t += replicate_figure_files()
     t += [
         "results/qc/summary.tsv",
         "results/qc/multiqc/multiqc_report.html",

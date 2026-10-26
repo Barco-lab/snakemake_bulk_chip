@@ -1,16 +1,33 @@
 # bigwig 与 deeptools QC：fingerprint（ChIP）、TSS profile / TSS enrichment
 
 
-def bigwig_args(wc):
+def bigwig_args(samples):
     b = config["bigwig"]
     args = f"--binSize {b['binsize']} --normalizeUsing {b['normalize']}"
     if b["normalize"] == "RPGC":
         args += f" --effectiveGenomeSize {REF['effective_genome_size']}"
     if REF.get("blacklist"):
         args += f" --blackListFileName {REF['blacklist']}"
-    # PE 按真实片段延伸；SE 延伸到估计片段长度
-    args += " --extendReads" if is_pe(wc.sample) else f" --extendReads {b['se_fragment_length']}"
+    # PE 按真实片段延伸；SE 延伸到估计片段长度（PE、SE 合并时 PE 仍按真实片段）
+    args += " --extendReads" if all(is_pe(s) for s in samples) else f" --extendReads {b['se_fragment_length']}"
     return f"{args} {b['extra']}"
+
+
+def group_bigwig_cmd(wc, input):
+    """merge：合并后的 BAM 按单样本参数 bamCoverage；mean：各重复的 bigwig 逐 bin 取平均。"""
+    if BW_GROUP["method"] == "merge":
+        return f"bamCoverage -b {input.bam} {bigwig_args(BW_GROUPS[wc.group])}"
+    args = f"--binSize {config['bigwig']['binsize']}"
+    if REF.get("blacklist"):
+        args += f" --blackListFileName {REF['blacklist']}"
+    return f"bigwigAverage -b {' '.join(input.bw)} {args}"
+
+
+def group_bigwig_input(wc):
+    if BW_GROUP["method"] == "merge":
+        bam = f"results/04_bigwig/groups/{wc.group}.merged.bam"
+        return {"bam": bam, "bai": f"{bam}.bai"}
+    return {"bw": expand("results/04_bigwig/{sample}.bw", sample=BW_GROUPS[wc.group])}
 
 
 rule bigwig:
@@ -20,7 +37,7 @@ rule bigwig:
     output:
         "results/04_bigwig/{sample}.bw",
     params:
-        args=bigwig_args,
+        args=lambda wc: bigwig_args([wc.sample]),
     threads: threads_for("deeptools")
     log:
         "<logs>/bigwig/{sample}.log",
@@ -30,6 +47,46 @@ rule bigwig:
         ENV_MACS
     shell:
         "bamCoverage -b {input.bam} -o {output} -p {threads} {params.args} > {log} 2>&1"
+
+
+rule group_bam:
+    """组 bigwig（method: merge）：合并组内参与合并的去重 BAM，生成 bigwig 后自动删除。"""
+    input:
+        bams=lambda wc: expand("results/02_align/{sample}.dedup.bam", sample=BW_GROUPS[wc.group]),
+    output:
+        bam=temp("results/04_bigwig/groups/{group}.merged.bam"),
+        bai=temp("results/04_bigwig/groups/{group}.merged.bam.bai"),
+    threads: threads_for("filter")
+    log:
+        "<logs>/bigwig/groups/{group}.merge.log",
+    benchmark:
+        "<benchmarks>/bigwig/groups/{group}.merge.tsv"
+    conda:
+        ENV_MACS
+    shell:
+        """
+        samtools merge -f -@ {threads} -o {output.bam} {input.bams} > {log} 2>&1
+        samtools index -@ {threads} {output.bam} >> {log} 2>&1
+        """
+
+
+rule group_bigwig:
+    """每组一个 bigwig：样本表 merge 列为 no 的重复不参与；方法见 bigwig.group.method。"""
+    input:
+        unpack(group_bigwig_input),
+    output:
+        "results/04_bigwig/groups/{group}.bw",
+    params:
+        cmd=group_bigwig_cmd,
+    threads: threads_for("deeptools")
+    log:
+        "<logs>/bigwig/groups/{group}.log",
+    benchmark:
+        "<benchmarks>/bigwig/groups/{group}.tsv"
+    conda:
+        ENV_MACS
+    shell:
+        "{params.cmd} -o {output} -p {threads} > {log} 2>&1"
 
 
 rule fingerprint:

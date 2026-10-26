@@ -1,10 +1,12 @@
 """
-单文件 HTML QC 报告：概览、流程与参数、QC 汇总表（中英文可切换）。
-所有样式、脚本和流程图都内嵌，不依赖网络。各列说明、参考值和检查规则来自 workflow/report/qc_metrics.yaml：
+单文件 HTML QC 报告：概览、流程与参数、QC 汇总表、重复一致性（中英文可切换）。
+所有样式、脚本、流程图和图片都内嵌，不依赖网络。各列说明、参考值和检查规则来自 workflow/report/qc_metrics.yaml：
   checks  有公开阈值的检查（warn 橙 / fail 红）
   outlier 与本批样本比较，|值 - 中位数| > 3 x MAD（x 1.4826）标为橙色
+重复一致性的数据与图来自 results/qc/replicates/（replicate_qc.py 计算，replicate_plots.R 绘图）。
 """
 import html
+import json
 import re
 import sys
 from datetime import datetime
@@ -119,6 +121,66 @@ for key, m in METRICS.items():
                  f"明显{'高' if hi else '低'}于本批中位数 {mt}（|差| > 3 × MAD）",
                  f"{'above' if hi else 'below'} the batch median {mt} (|diff| > 3 × MAD)")
 
+# ------------------------------------------------------------
+# 重复一致性的检查（均为 warn：没有公开阈值）
+# ------------------------------------------------------------
+inp = snakemake.input
+REP = "rep_info" in inp.keys()
+REP_COLS = meta.get("replicates", {})
+if REP:
+    rinfo = json.loads(Path(inp.rep_info).read_text())
+    rs = pd.read_csv(inp.rep_samples, sep="\t")
+    rg = pd.read_csv(inp.rep_groups, sep="\t")
+    row_of = {s: i for i, s in df["sample"].items()}
+    reps = rs[rs["within_cor"].notna()]
+
+    for _, r in reps.iterrows():
+        if r.max_other_cor > r.within_cor:
+            flag(row_of[r["sample"]], "within_cor", "warn",
+                 f"与 {r.max_other_group} 组的 {r.max_other_sample} 相关性（{r.max_other_cor:.3f}）高于组内平均（{r.within_cor:.3f}）："
+                 "两组差异小时属正常，否则请确认样本标签",
+                 f"correlates more with {r.max_other_sample} of {r.max_other_group} ({r.max_other_cor:.3f}) than with its own "
+                 f"replicates on average ({r.within_cor:.3f}): expected when the groups differ little, otherwise check the sample labels")
+
+    for key, zh, en in (("within_cor", "组内相关性", "Within-group correlation"),
+                        ("mean_jaccard", "与同组重复的 peak 重叠（Jaccard）", "Peak overlap (Jaccard) with its replicates")):
+        s = reps[key].dropna()
+        if len(s) < 4:
+            continue
+        m = s.median()
+        mad = 1.4826 * (s - m).abs().median()
+        for j, v in s.items():
+            if mad > 0 and m - v > 3 * mad:
+                flag(row_of[reps.loc[j, "sample"]], key, "warn",
+                     f"{zh}明显低于本批中位数 {m:.3f}（差 > 3 × MAD）", f"{en} well below the batch median {m:.3f} (> 3 × MAD)")
+
+    if "sex" in rs:
+        lo, hi = rinfo["y_frac"]
+        for _, r in rs[rs["sex"] == "undetermined"].iterrows():
+            flag(row_of[r["sample"]], "sex", "warn",
+                 f"chrY 占比 {r.y_frac:.4g}%，介于阈值 {lo}%–{hi}% 之间，无法判断",
+                 f"chrY fraction {r.y_frac:.4g}%, between the thresholds {lo}%–{hi}%; undetermined")
+        for g, sub in rs[rs["sex"].isin(["F", "M"])].groupby("group"):
+            vc = sub["sex"].value_counts()
+            if len(vc) < 2:
+                continue
+            counts = "、".join(f"{k} {v}" for k, v in vc.items())
+            for _, r in sub[sub["sex"].map(vc) <= len(sub) / 2].iterrows():
+                flag(row_of[r["sample"]], "sex", "warn",
+                     f"推断为 {r.sex}（chrY 占比 {r.y_frac:.4g}%），与同组其他样本不同（{counts}）",
+                     f"inferred {r.sex} (chrY fraction {r.y_frac:.4g}%), unlike the rest of the group ({counts.replace('、', ', ')})")
+        # chrX 占比随细胞类型变化，只在组内比较：雄性只有一条 X，占比应低于同组雌性
+        for g, sub in rs[rs["x_frac"].notna()].groupby("group"):
+            if len(sub) < 3:
+                continue
+            m = sub["x_frac"].median()
+            mad = 1.4826 * (sub["x_frac"] - m).abs().median()
+            for _, r in sub.iterrows():
+                if mad > 0 and m - r.x_frac > 3 * mad:
+                    flag(row_of[r["sample"]], "x_frac", "warn",
+                         f"chrX 占比 {r.x_frac:.2f}% 明显低于同组中位数 {m:.2f}%（差 > 3 × MAD），可能是雄性或混入了雄性样本",
+                         f"chrX fraction {r.x_frac:.2f}% well below the group median {m:.2f}% (> 3 × MAD); possibly male or mixed with a male sample")
+
 flagged = sorted({i for i, _ in flags})
 
 shown = list(df.columns)
@@ -151,6 +213,8 @@ tiles = [
     (("重复率中位数", "Median duplicate rate"), med_of(ip, "duplicates_rate", 1, 1, "%"), ("IP 样本，以 filtered 为分母", "IP samples, of filtered")),
     (("FRiP 中位数", "Median FRiP"), med_of(ip, "frip", 1, 3), ("IP 样本", "IP samples")),
     (("peak 数中位数", "Median peaks"), med_of(ip, "peaks", 1e3, 1, "k"), ("IP 样本", "IP samples")),
+    (("组内相关性中位数", "Median within-group r"),
+     f"{rs['within_cor'].median():.3f}" if REP and rs["within_cor"].notna().any() else None, ("IP 样本重复一致性", "IP replicate consistency")),
     (("需关注的样本", "Samples to review"), str(len(flagged)), ("见下方列表", "listed below")),
 ]
 tiles_html = "".join(
@@ -307,6 +371,218 @@ for i, row in df.iterrows():
 table_html = f'<table class="qc" id="qc"><thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table>'
 
 # ------------------------------------------------------------
+# 重复一致性
+# ------------------------------------------------------------
+def inline_svg(path, prefix):
+    """内嵌 R 输出的 SVG：去掉 XML 声明和固定尺寸；各图的 id（glyph、clip）加前缀，避免互相冲突。"""
+    t = re.sub(r"^<\?xml[^>]*>\s*", "", Path(path).read_text())
+    t = re.sub(r'\bid="([^"]+)"', rf'id="{prefix}-\1"', t)
+    t = re.sub(r'((?:xlink:)?href)="#([^"]+)"', rf'\1="#{prefix}-\2"', t)
+    t = re.sub(r"url\(#([^)]+)\)", rf"url(#{prefix}-\1)", t)
+    return re.sub(r'(<svg[^>]*?) width="[^"]*" height="[^"]*"', r"\1", t, count=1)
+
+
+def rep_fmt(key, v):
+    if pd.isna(v):
+        return ""
+    if key in ("peaks", "median_peaks", "reproducible_peaks", "n_samples"):
+        return f"{int(v):,}"
+    if isinstance(v, float):
+        return f"{v:.{REP_COLS.get(key, {}).get('digits', 2)}f}"
+    return str(v)
+
+
+def rep_table(frame, keys, show=None):
+    """可排序的表；show[key](row) 可改写显示内容；样本行按 flags 标色。"""
+    show = show or {}
+
+    def tip(k):
+        m = REP_COLS.get(k, {})
+        dz, de = zh_en(m.get("desc", ""))
+        if m.get("ref"):
+            rz, re_ = zh_en(m["ref"])
+            dz, de = dz + f"\n参考值：{rz}", de + f"\nReference: {re_}"
+        return T(dz, de) if dz else ""
+
+    num = {k: pd.api.types.is_numeric_dtype(frame[k]) for k in keys}
+    head = "".join(f'<th{tip(k)}{" class=num" if num[k] else ""}>{esc(k)}<span class="sort"></span></th>' for k in keys)
+    body = []
+    for _, r in frame.iterrows():
+        i = row_of.get(r.get("sample")) if "sample" in keys else None
+        cells = []
+        for k in keys:
+            cls = (["num"] if num[k] else []) + (["sample"] if k in ("sample", "group") and k == keys[0] else [])
+            t = ""
+            if (i, k) in flags:
+                lst = flags[(i, k)]
+                cls.append("fail" if any(l == "fail" for l, *_ in lst) else "warn")
+                t = T("；".join(z for _, z, _ in lst), "; ".join(e for *_, e in lst))
+            v = r[k]
+            text = show[k](r) if k in show else rep_fmt(k, v)
+            cells.append(f'<td class="{" ".join(cls)}" data-v="{esc("" if pd.isna(v) else v)}"{t}>{esc(text)}</td>')
+        body.append("<tr>" + "".join(cells) + "</tr>")
+    return f'<div class="scroll"><table class="qc"><thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div>'
+
+
+rep_html = ""
+if REP:
+    method = "Spearman" if rinfo["method"] == "spearman" else "Pearson"
+    n_cons = f"{rinfo['consensus_peaks']:,}"
+    sm = rinfo.get("summits")
+    cons_zh = (f"consensus peak 由 DiffBind 得到：各组组内 consensus（至少 {rinfo['min_reps']} 个重复）取并集，"
+               + (f"dba.count 以全部 IP 样本 reads 的峰顶 ± {sm} bp 计数。" if sm else "dba.count 按合并后的原宽度计数（有 broad 的组时不按峰顶重新定位）。"))
+    cons_en = (f"Consensus peaks come from DiffBind: the union of the within-group consensus sets (≥ {rinfo['min_reps']} replicates), "
+               + (f"counted by dba.count at the summit of the pooled IP reads ± {sm} bp." if sm
+                  else "counted by dba.count over the merged widths (no summit recentring when broad groups are present)."))
+    lo, hi = rinfo["y_frac"]
+    mm10 = rinfo.get("genome") == "mm10"
+    big_groups = [g for g in rinfo["rep_groups"] if len(rinfo["groups"][g]) > 4]
+    FIGS = {
+        "correlation": (
+            ("样本间相关性", "Sample-to-sample correlation of ChIP signal"),
+            (f"{method} 相关系数，基于 {n_cons} 个 consensus peak 上 IP 计数的 log2(CPM + 1)（不扣除 input），按 1 − r 层次聚类（average linkage），"
+             f"上方色条为分组。{cons_zh}色标为 viridis 顺序色板，范围为最小 r 到 1：样本间相关系数均为正，以 0 为中心的发散色板会浪费一半色阶、难以分辨高相关区间的差异。",
+             f"{method} correlation of log2(CPM + 1) of IP counts over {n_cons} consensus peaks (input not subtracted), clustered by 1 − r (average linkage); the bar on top "
+             f"shows the groups. {cons_en} A sequential viridis scale runs from the lowest r to 1: correlations between samples are all positive, so a "
+             "diverging scale centred on 0 would waste half of its range and hide differences among high correlations."),
+        ),
+        "pca": (
+            ("主成分分析", "Principal component analysis of ChIP signal"),
+            (f"基于方差最大的 {rinfo['pca_peaks']} 个 consensus peak 上 IP 计数的 log2(CPM + 1)（中心化，未标准化）；坐标轴括号内为解释的方差比例，点旁为重复编号。",
+             f"log2(CPM + 1) of IP counts on the {rinfo['pca_peaks']} most variable consensus peaks (centred, not scaled); axis labels give the "
+             "proportion of variance explained; points are labelled with the replicate."),
+        ),
+        "peak_overlap": (
+            ("组内重复 peak 的重叠", "Pairwise overlap of replicate peaks within groups"),
+            ("每个点为组内一对重复的 Jaccard 指数（交集 / 并集，按碱基，bedtools jaccard），横线为中位数。数值随 peak 数和测序深度变化，主要用于组间比较。",
+             "Each point is the Jaccard index (intersection / union in bp, bedtools jaccard) of one pair of replicates; bars show the "
+             "median. Values depend on peak numbers and depth, so compare across groups."),
+        ),
+        "peak_venn": (
+            ("组内重复 peak 覆盖碱基的 Venn 图", "Venn diagrams of bases covered by replicate peaks within groups"),
+            ("每个区域的数字为只被这几个重复的 peak 覆盖的碱基数（Mb，bedtools multiinter），颜色按同一数值着色；"
+             "一个圆（椭圆）内各区域之和即该重复 peak 覆盖的总碱基数，与重复的顺序无关。区域面积不按比例。"
+             "按碱基而非 peak 个数统计，避免一个重复中的宽 peak 对应另一重复中多个窄 peak 时计数不一致；与 Jaccard 同一口径"
+             "（Jaccard = 两者共有碱基 / 并集碱基）。"
+             + (f"重复数超过 4 的组（{names(big_groups)}）不画，见 Jaccard 图。" if big_groups else ""),
+             "Each number is the number of bases (Mb, bedtools multiinter) covered by the peaks of exactly those replicates, and the "
+             "colour encodes the same value; the regions inside a circle (ellipse) add up to the bases covered by that replicate, "
+             "independent of replicate order. Areas are not to scale. Bases rather than peak numbers are counted so that one broad "
+             "peak matching several narrow peaks in another replicate is counted consistently; this matches the Jaccard index "
+             "(shared bases / union)."
+             + (f" Groups with more than 4 replicates ({names(big_groups)}) are not drawn; see the Jaccard figure." if big_groups else "")),
+        ),
+        "sex": (
+            ("根据 chrX、chrY reads 占比推断性别", "Sex inferred from the fraction of reads on chrX and chrY"),
+            (f"两轴均为占全部比对 reads（过滤 MAPQ ≥ {rinfo['mapq']} 并去重后）的百分比。纵轴只统计 chrY 计数区 {rinfo['y_region']}"
+             "（对数轴，0 显示为 0.00001%）：即 chrY 去掉 PAR（拟常染色体区，X、Y 上序列相同，雌性 reads 也会比对上）后的部分"
+             + ("，并在 PAR 起点前多去掉约 745 kb，因为雌性样本在那里也有大量 reads" if mm10 else "") + "。该区域仍含与 chrX 同源的扩增序列，"
+             f"雌性样本也有少量 reads，因此按阈值判定：虚线为阈值（< {lo}% 雌性，> {hi}% 雄性，之间无法判断）。"
+             "横轴 chrX 占比在 IP 样本中随抗体、细胞类型变化，不用于判定，只在组内比较；input 为全基因组 DNA，其 chrX 占比反映 X 拷贝数。"
+             "包括对照样本（按其 group 着色）。只标注未判为雌性的样本。",
+             f"Both axes give the percentage of all mapped reads (MAPQ ≥ {rinfo['mapq']}, deduplicated). The y axis counts only the chrY "
+             f"region {rinfo['y_region']} (log scale; 0 shown as 0.00001%): chrY without the pseudoautosomal region (PAR, identical on X "
+             "and Y, so female reads also map there)"
+             + ("; a further ~745 kb before the PAR is excluded because female samples also have many reads there" if mm10 else "")
+             + ". The region still contains X-homologous ampliconic sequence, so female samples carry a few reads "
+             f"and the call uses thresholds (dashed lines: < {lo}% female, > {hi}% male, undetermined in between). The chrX fraction on "
+             "the x axis varies with antibody and cell type in IP samples, so it is only compared within groups and not used for the "
+             "call; in input DNA it reflects the X copy number. Control samples are included (coloured by their group). Only samples "
+             "not called female are labelled."),
+        ),
+    }
+    figs_html = []
+    for k, (fig, path) in enumerate(zip(p.rep_figures, inp.rep_svg), 1):
+        (tz, te), (nz, ne) = FIGS[fig]
+        links = " · ".join(f'<a href="replicates/figures/{fig}.{x}" target="_blank">{x.upper()}</a>' for x in ("pdf", "png", "svg"))
+        figs_html.append(
+            f'<figure class="card apa" id="fig-{fig}"><div class="fig-label">{L(f"图 {k}", f"Figure {k}")}</div>'
+            f'<div class="fig-title">{L(tz, te)}</div><div class="fig-img">{inline_svg(path, f"f{k}")}</div>'
+            f'<figcaption><i>{L("注：", "Note.")}</i> {L(nz, ne)}</figcaption><div class="muted dl">{links}</div></figure>'
+        )
+
+    cols_s = ["sample", "group"] + (["role"] if (rs["role"] == "control").any() else []) + [
+        "peaks", "within_cor", "max_other_cor", "mean_jaccard"]
+    if "sex" in rs:
+        cols_s += ["y_frac", "x_frac", "sex"]
+    sample_table = rep_table(rs, cols_s, {
+        "max_other_cor": lambda r: f"{r.max_other_cor:.3f} ({r.max_other_sample})" if pd.notna(r.max_other_cor) else "",
+    })
+    group_table = rep_table(rg, ["group", "n_samples", "median_peaks", "reproducible_peaks", "median_jaccard", "min_jaccard", "mean_within_cor"])
+
+    # 要点
+    rp = []
+    single = [g for g, n_ in zip(rg["group"], rg["n_samples"]) if n_ < 2]
+    rp.append((
+        f"分组：{len(rg)} 组，{len(rg) - len(single)} 组有 ≥ 2 个重复" + (f"（只有 1 个样本的组不参与组内比较：{names(single)}）" if single else "")
+        + f"；各组 reproducible peak 取并集为 {n_cons} 个 consensus peak（DiffBind" + (f"，峰顶 ± {sm} bp" if sm else "，原宽度") + "），用于相关性和 PCA。",
+        f"Groups: {len(rg)}, {len(rg) - len(single)} with ≥ 2 replicates" + (f" (single-sample groups are not compared within: {names(single)})" if single else "")
+        + f"; the union of the reproducible peaks of all groups gives {n_cons} consensus peaks (DiffBind" + (f", summit ± {sm} bp" if sm else ", merged widths") + ") used for correlation and PCA.",
+    ))
+    if len(reps):
+        wc_m, wc_r = rng(reps["within_cor"], 1, 3)
+        worst = rg.loc[rg["mean_within_cor"].idxmin()]
+        closer = [r["sample"] for _, r in reps.iterrows() if r.max_other_cor > r.within_cor]
+        rp.append((
+            f"相关性：样本与同组重复的平均 {method} r 中位数 {wc_m}（{wc_r}），最低的组为 {worst.group}（{worst.mean_within_cor:.3f}）。"
+            + (f"{len(closer)} 个样本与其他组某个样本的相关性高于组内平均（{names(closer)}）；如果只发生在差异较小的组之间（如同一细胞类型的不同处理），属正常现象。" if closer else "所有样本都与本组重复最相似。"),
+            f"Correlation: median within-group {method} r {wc_m} ({wc_r}); lowest group {worst.group} ({worst.mean_within_cor:.3f}). "
+            + (f"{len(closer)} samples correlate more with a sample of another group than with their own replicates on average ({names(closer)}); this is expected between groups that differ little (e.g. one cell type under two conditions)." if closer else "Every sample is most similar to its own replicates."),
+        ))
+        jg = rg.dropna(subset=["median_jaccard"])
+        lowj = jg.loc[jg["median_jaccard"].idxmin()]
+        rp.append((
+            f"peak 重现性：组内重复 Jaccard 中位数 {jg['median_jaccard'].min():.3f}–{jg['median_jaccard'].max():.3f}，最低的组为 {lowj.group}"
+            f"（最低一对 {lowj.min_jaccard:.3f}）。Jaccard 随 peak 数和测序深度变化，深度低或 FRiP 低的样本通常也较低。",
+            f"Peak reproducibility: median within-group Jaccard {jg['median_jaccard'].min():.3f}–{jg['median_jaccard'].max():.3f}; lowest group {lowj.group} "
+            f"(lowest pair {lowj.min_jaccard:.3f}). Jaccard depends on peak numbers and depth, so shallow or low-FRiP samples tend to score lower.",
+        ))
+    if rinfo["pca_variance"]:
+        v = [x * 100 for x in rinfo["pca_variance"]]
+        rp.append((f"PCA：PC1 解释 {v[0]:.1f}% 的方差，PC2 解释 {v[1]:.1f}%。", f"PCA: PC1 explains {v[0]:.1f}% of the variance, PC2 {v[1]:.1f}%."))
+    if "sex" in rs:
+        vc = rs["sex"].value_counts()
+        cnt_z = "、".join(f"{k} {v}" for k, v in vc.items())
+        sex_flag = sorted({rs.loc[j, "sample"] for j in rs.index
+                           if any((row_of[rs.loc[j, "sample"]], k) in flags for k in ("sex", "x_frac"))})
+        rp.append((
+            f"性别（按 chrY 计数区 {rinfo['y_region']} 的 reads 占比判定）：{cnt_z}。"
+            + (f"需复核：{names(sex_flag)}（无法判断、与同组其他样本不同或 chrX 占比偏低；也可能是混入了另一性别的样本）。" if sex_flag else "各组内一致。"),
+            f"Sex (called from the fraction of reads in the chrY region {rinfo['y_region']}): {cnt_z.replace('、', ', ')}. "
+            + (f"Review: {names(sex_flag)} (undetermined, unlike the rest of the group or low chrX fraction; may also indicate a mixed sample)." if sex_flag else "Consistent within every group."),
+        ))
+    rep_keys = ("within_cor", "mean_jaccard", "sex", "x_frac")
+    rep_flagged = sorted({df.loc[i, "sample"] for (i, c) in flags if c in rep_keys})
+    rp.append((
+        "总体：" + (f"建议复核 {names(rep_flagged)}（原因见上表标色单元格）。" if rep_flagged else "各组重复一致性良好。"),
+        "Overall: " + (f"review {names(rep_flagged)} (reasons on the colored cells above)." if rep_flagged else "replicates are consistent within every group."),
+    ))
+    rep_points = "".join(f"<li>{L(zh, en)}</li>" for zh, en in rp)
+    tsvs = " · ".join(f'<a href="replicates/{f}" target="_blank">{f}</a>'
+                      for f in ("samples.tsv", "groups.tsv", "peak_overlap.tsv", "peak_venn.tsv", "correlation.tsv", "pca.tsv", "peak_counts.tsv"))
+    rep_html = f"""
+<section id="replicates">
+  <h2>{L("重复一致性", "Replicate consistency")}</h2>
+  <div class="card">
+    <h3>{L("每个样本", "Per sample")}</h3>
+    <p class="muted">{L("分组见 samples.tsv 的 group 列（为空时按样本名去掉 _repN 推断）。只比较 IP 样本；对照（input / IgG）只参与性别检查。点击表头排序；鼠标停在表头上显示含义，停在标色单元格上显示原因。",
+                        "Groups come from the group column of samples.tsv (inferred by removing _repN when empty). Only IP samples are compared; controls (input / IgG) enter the sex check only. Click a header to sort; hover a header for its definition or a colored cell for the reason.")}</p>
+    {sample_table}
+  </div>
+  <div class="card">
+    <h3>{L("每组", "Per group")}</h3>
+    {group_table}
+  </div>
+  <div class="card digest">
+    <ul class="points">{rep_points}</ul>
+    <p class="muted">{L("数据", "Data")}：{tsvs}</p>
+  </div>
+  {"".join(figs_html)}
+</section>
+"""
+
+
+# ------------------------------------------------------------
 # 页面
 # ------------------------------------------------------------
 title_zh, title_en = p.title
@@ -402,6 +678,13 @@ ul.points { margin: 0; padding-left: 20px; }
 ul.points li { margin: 8px 0; }
 ul.points li:last-child { font-weight: 600; }
 .digest { border-left: 4px solid var(--accent); }
+figure.apa { margin: 0 0 20px; }
+.fig-label { font-weight: 700; }
+.fig-title { font-style: italic; margin-bottom: 12px; }
+.fig-img { background: #fff; border-radius: 12px; padding: 8px; max-width: 880px; }
+.fig-img svg { width: 100%; height: auto; display: block; }
+figure.apa figcaption { margin-top: 12px; font-size: 13px; max-width: 880px; }
+.dl { margin-top: 6px; }
 @media (max-width: 860px) {
   nav { position: static; width: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 16px; }
   nav a.item { display: inline-block; }
@@ -479,6 +762,7 @@ page = f"""<!doctype html>
   <a class="item" href="#overview">{L("概览", "Overview")}</a>
   <a class="item" href="#workflow">{L("流程与参数", "Workflow & parameters")}</a>
   <a class="item" href="#summary">{L("QC 汇总表", "QC summary")}</a>
+  {f'<a class="item" href="#replicates">{L("重复一致性", "Replicate consistency")}</a>' if REP else ""}
   <div class="ext"><a href="{esc(p.multiqc)}" target="_blank">{L("MultiQC 报告", "MultiQC report")} ↗</a></div>
 </nav>
 <main>
@@ -523,6 +807,7 @@ page = f"""<!doctype html>
     <p class="muted">{L("参考来源", "References")}：{sources}</p>
   </div>
 </section>
+{rep_html}
 </main>
 <script>{JS}</script>
 </body>
