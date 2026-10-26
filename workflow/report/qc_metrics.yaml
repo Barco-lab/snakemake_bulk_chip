@@ -110,6 +110,14 @@ metrics:
     desc: {zh: clean reads 比对到污染物种的比例, en: Fraction of clean reads aligning to the contaminant genome}
     ref: {zh: 无统一标准，与同批样本比较, en: No consensus threshold; compare within the batch}
     outlier: true
+  subnucleosomal_rate:
+    desc:
+      zh: 去重后 PE 片段中长度 < 120 bp（亚核小体）的比例（samtools stats，只含最主要的 99% 片段；SE 样本为空）。分布见图 1
+      en: Share of deduplicated PE fragments shorter than 120 bp (sub-nucleosomal; samtools stats, main 99% of fragments; empty for SE). Distribution in Figure 1
+    ref:
+      zh: 无统一阈值。CUT&Tag 中亚核小体片段来自 Tn5 在开放 DNA 中切两次：组蛋白标记应以单核小体片段为主，比例高、接近 IgG 对照提示开放染色质（Tn5）偏好；ATAC-seq 中则本应较高。ChIP-seq 中取决于超声打断，不按此解读
+      en: No consensus threshold. In CUT&Tag, sub-nucleosomal fragments come from two Tn5 cuts in open DNA; histone marks should be dominated by mono-nucleosomal fragments, so a high share close to the IgG control points to an open-chromatin (Tn5) bias. In ChIP-seq it reflects sonication and is not read this way
+    outlier: true
 
 # 「重复一致性」一节的表格列（results/qc/replicates/samples.tsv、groups.tsv）；检查规则写在 qc_report.py 中
 replicates:

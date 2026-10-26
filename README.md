@@ -129,6 +129,7 @@ project/
 ├── results/
 │   ├── qc/report.html                   # ★ QC 报告（单文件）：概览、流程与参数、QC 汇总表、重复一致性、信号 profile；指标说明与参考值见 workflow/report/qc_metrics.yaml
 │   ├── qc/summary.tsv                   # 每个样本的 reads 数、比对率、重复率、peak 数、FRiP 等（纯数字）
+│   ├── qc/fragment_length.tsv           # PE 样本各片段长度的片段数与占比；图为 qc/figures/fragment_length.（pdf / png / svg）
 │   ├── 03_peaks/{sample}.narrowPeak     # ★ 已去除 blacklist 的 peak（broad 样本为 .broadPeak）
 │   ├── 03_peaks/macs3/{sample}/         # macs3 原始输出（xls、summits 等）
 │   ├── 03_peaks/reproducible/{group}.bed  # 组内至少在 min_reps 个重复中出现的 peak（第 4 列为重复数）
@@ -173,6 +174,7 @@ project/
 | `peaks` / `frip` | peak 数与 FRiP（peak 内 reads / dedup_reads） | TF ChIP 的 FRiP ≥ 1%（ENCODE 指南） |
 | `tss_enrichment (±3000bp)` | TSS 中心信号 / 两端背景（按 deeptools profile 估算，窗口由 `qc.tss_matrix` 决定） |  |
 | `contamination_rate (% of clean)` | clean reads 比对到污染物种的比例（仅 `contamination.enabled` 时输出） | |
+| `subnucleosomal_rate (% of fragments < 120bp)` | 去重后 PE 片段中 < 120 bp（亚核小体）的比例（samtools stats；SE 为空）。CUT&Tag 中偏高、接近 IgG 提示开放染色质（Tn5）偏好；分布图见 `qc/figures/fragment_length.*` | |
 
 ---
 

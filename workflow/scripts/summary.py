@@ -14,7 +14,9 @@ rate 以进入该步骤的 reads 为分母（与各软件报告、ENCODE 标准�
   peaks / frip        blacklist 过滤后的 peak 数与 FRiP（peak 内 reads / dedup_reads；control 样本为空）
   tss_enrichment      TSS 中心信号 / 两端 flank 信号（deeptools profile）
   contamination_rate  trim 后 reads 比对到污染物种的比例（contamination.enabled 时）
+  subnucleosomal_rate 去重后 PE 片段中长度 < 120 bp 的比例（samtools stats 的 IS 段；SE 样本为空）
 表头括号内为对应的 config 值与分母。输出纯数字，MultiQC 与 qc_report 读取。
+另输出 fragment_length.tsv（PE 样本每个片段长度的片段数与占比），供 fragment_plot 绘图。
 """
 import re
 import sys
@@ -46,6 +48,12 @@ def bowtie2_stats(path):
 def mito_reads(path, mito):
     df = pd.read_csv(path, sep="\t", header=None, names=["chrom", "len", "mapped", "unmapped"])
     return int(df.loc[df["chrom"] == mito, "mapped"].sum())
+
+
+def fragment_hist(path):
+    """samtools stats 的 IS 段：片段长度与片段数（pairs total）；只含 samtools 输出的主要 99% 片段。"""
+    rows = [line.split("\t")[1:3] for line in Path(path).read_text().splitlines() if line.startswith("IS\t")]
+    return pd.Series({int(n): int(c) for n, c in rows}, dtype="int64")
 
 
 def pct(n, total):
@@ -101,6 +109,20 @@ C_FILT = f"filtered_reads (q{snakemake.params.mapq})"
 C_MITO = f"mito_rate ({snakemake.params.mito}) (% of mapped)"
 C_TSS = f"tss_enrichment (±{UP}bp)" if UP == DOWN else f"tss_enrichment (-{UP}/+{DOWN}bp)"
 C_CONTAM = "contamination_rate (% of clean)"
+C_SUB = "subnucleosomal_rate (% of fragments < 120bp)"
+SUBNUC = 120
+
+# PE 样本的片段长度分布
+frag = {}
+for i, s in enumerate(snakemake.params.samples):
+    if meta[s]["layout"] == "PE":
+        h = fragment_hist(inp.stats[i])
+        if h.sum():
+            frag[s] = h
+pd.DataFrame(
+    [(s, n, c, 100 * c / h.sum()) for s, h in frag.items() for n, c in h.items()],
+    columns=["sample", "length", "fragments", "pct"],
+).round({"pct": 4}).to_csv(snakemake.output.fragments, sep="\t", index=False)
 
 rows = []
 for i, s in enumerate(snakemake.params.samples):
@@ -132,6 +154,7 @@ for i, s in enumerate(snakemake.params.samples):
         "frip": frip.get(s),
         C_TSS: tss.get(s),
         C_CONTAM: contam[s][1] if s in contam else None,
+        C_SUB: pct(frag[s][frag[s].index < SUBNUC].sum(), frag[s].sum()) if s in frag else None,
     }
     rows.append(row)
 
@@ -140,6 +163,8 @@ if not contam:
     df = df.drop(columns=[C_CONTAM])
 if not tss:
     df = df.drop(columns=[C_TSS])
+if not frag:
+    df = df.drop(columns=[C_SUB])
 count_cols = [c for c in df.columns if "_reads" in c or c == "peaks"]
 for c in df.columns:
     if "(%" in c:
@@ -149,4 +174,4 @@ for c in df.columns:
     elif c in count_cols:
         df[c] = df[c].astype("Int64")
 
-df.to_csv(snakemake.output[0], sep="\t", index=False)
+df.to_csv(snakemake.output.summary, sep="\t", index=False)

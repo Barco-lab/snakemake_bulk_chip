@@ -433,6 +433,33 @@ def rep_table(frame, keys, show=None):
     return f'<div class="scroll"><table class="qc"><thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div>'
 
 
+# ------------------------------------------------------------
+# 片段长度分布（PE 样本；图 1，放在 QC 汇总表之后）
+# ------------------------------------------------------------
+frag_html = ""
+N_FRAG = int("frag_svg" in inp.keys())
+if N_FRAG:
+    links = " · ".join(f'<a href="figures/fragment_length.{x}" target="_blank">{x.upper()}</a>' for x in ("pdf", "png", "svg"))
+    frag_html = (
+        f'<figure class="card apa" id="fig-fragment_length"><div class="fig-label">{L("图 1", "Figure 1")}</div>'
+        f'<div class="fig-title">{L("片段长度分布", "Fragment length distribution")}</div>'
+        f'<div class="fig-img">{inline_svg(inp.frag_svg, "frag")}</div>'
+        f'<figcaption><i>{L("注：", "Note.")}</i> ' + L(
+            "每组一个分面，每条线为一个 PE 样本去重后 BAM 中各长度片段的占比（samtools stats，只含最主要的 99% 片段），"
+            "峰顶标注样本名；对照为虚线；SE 样本没有片段长度，不画。灰色区域（< 120 bp）为亚核小体片段，其占比即汇总表的 "
+            "subnucleosomal_rate。CUT&Tag 中亚核小体片段来自 Tn5 在开放 DNA 中切两次，组蛋白标记应以单核小体片段"
+            "（约 150–250 bp）为主，并可见约 10 bp 的锯齿（DNA 螺旋周期）和二、三核小体的峰；亚核小体片段多、接近 IgG 对照，"
+            "提示信号中开放染色质（Tn5 偏好）的成分较多。ChIP-seq 的片段长度由超声打断决定，不按此解读。",
+            "One panel per group; each line is the share of fragments of each length in the deduplicated BAM of one PE sample "
+            "(samtools stats, main 99% of fragments only), labelled at its peak; controls are dashed; SE samples have no "
+            "fragment lengths and are not shown. The grey area (< 120 bp) holds sub-nucleosomal fragments, whose share is "
+            "subnucleosomal_rate in the summary table. In CUT&Tag, sub-nucleosomal fragments come from two Tn5 cuts in open DNA; "
+            "histone marks should be dominated by mono-nucleosomal fragments (~150–250 bp), with a ~10 bp sawtooth (DNA helical "
+            "period) and di- / tri-nucleosome peaks. Many sub-nucleosomal fragments, approaching the IgG control, point to a large "
+            "open-chromatin (Tn5 bias) component. In ChIP-seq fragment length reflects sonication and is not read this way.")
+        + f'</figcaption><div class="muted dl">{links} · <a href="fragment_length.tsv" target="_blank">fragment_length.tsv</a></div></figure>'
+    )
+
 rep_html = ""
 if REP:
     method = "Spearman" if rinfo["method"] == "spearman" else "Pearson"
@@ -527,7 +554,7 @@ if REP:
         ),
     }
     figs_html = []
-    for k, (fig, path) in enumerate(zip(p.rep_figures, inp.rep_svg), 1):
+    for k, (fig, path) in enumerate(zip(p.rep_figures, inp.rep_svg), 1 + N_FRAG):
         (tz, te), (nz, ne) = FIGS[fig]
         links = " · ".join(f'<a href="replicates/figures/{fig}.{x}" target="_blank">{x.upper()}</a>' for x in ("pdf", "png", "svg"))
         figs_html.append(
@@ -685,7 +712,7 @@ if "prof_samples" in inp.keys():
 
 prof_html = ""
 if prof_figs:
-    k0 = len(p.rep_figures) if REP else 0
+    k0 = N_FRAG + (len(p.rep_figures) if REP else 0)
     items = []
     for k, (name, path, (tz, te), (nz, ne)) in enumerate(prof_figs, k0 + 1):
         png = base64.b64encode(Path(path).read_bytes()).decode()
@@ -973,6 +1000,7 @@ page = f"""<!doctype html>
     <ul class="points">{conclusion}</ul>
     <p class="muted">{L("参考来源", "References")}：{sources}</p>
   </div>
+  {frag_html}
 </section>
 {rep_html}
 {prof_html}

@@ -47,7 +47,8 @@ rule summary:
             else []
         ),
     output:
-        "results/qc/summary.tsv",
+        summary="results/qc/summary.tsv",
+        fragments="results/qc/fragment_length.tsv",
     params:
         samples=SAMPLES,
         peak_samples=PEAK_SAMPLES,
@@ -111,6 +112,32 @@ rule multiqc:
             -n multiqc_report.html {params.files} > {log} 2>&1
         """
 
+
+
+FRAG_FIG = "results/qc/figures/fragment_length"
+
+
+def fragment_report_inputs():
+    """QC 报告中的片段长度分布图（只有 SE 样本时不画）。"""
+    return {"frag_svg": f"{FRAG_FIG}.svg"} if PE_SAMPLES else {}
+
+
+rule fragment_plot:
+    """PE 样本去重后的片段长度分布（R，ggplot2）：PNG 300 dpi、PDF、SVG（嵌入 QC 报告）。"""
+    input:
+        "results/qc/fragment_length.tsv",
+    output:
+        multiext(FRAG_FIG, ".png", ".pdf", ".svg"),
+    params:
+        groups={s: SAMPLES_DF.loc[s, "group"] for s in SAMPLES},
+        controls=sorted(CONTROLS),
+        max_length=600,
+    log:
+        "<logs>/fragment_plot.log",
+    conda:
+        ENV_MAIN
+    script:
+        "../scripts/fragment_plot.R"
 
 
 def group_bigwig_desc():
@@ -200,6 +227,7 @@ rule qc_report:
     input:
         unpack(lambda wc: replicate_report_inputs()),
         unpack(lambda wc: profile_files()),
+        unpack(lambda wc: fragment_report_inputs()),
         summary="results/qc/summary.tsv",
         multiqc="results/qc/multiqc/multiqc_report.html",
         metrics=workflow.source_path("../report/qc_metrics.yaml"),

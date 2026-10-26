@@ -129,6 +129,7 @@ project/
 ├── results/
 │   ├── qc/report.html                   # ★ QC report (single file): overview, workflow & parameters, QC summary, replicate consistency, signal profiles; definitions and references in workflow/report/qc_metrics.yaml
 │   ├── qc/summary.tsv                   # reads, mapping rate, duplicate rate, peaks, FRiP, etc. per sample (plain numbers)
+│   ├── qc/fragment_length.tsv           # fragments and share per fragment length for PE samples; plot in qc/figures/fragment_length.(pdf / png / svg)
 │   ├── 03_peaks/{sample}.narrowPeak     # ★ peaks with blacklist regions removed (.broadPeak for broad samples)
 │   ├── 03_peaks/macs3/{sample}/         # raw macs3 output (xls, summits, etc.)
 │   ├── 03_peaks/reproducible/{group}.bed  # peaks present in at least min_reps replicates (column 4: number of replicates)
@@ -173,6 +174,7 @@ project/
 | `peaks` / `frip` | number of peaks and FRiP (reads in peaks / dedup_reads) | FRiP ≥ 1% for TF ChIP (ENCODE guidelines) |
 | `tss_enrichment (±3000bp)` | TSS centre signal / flank background (estimated from the deeptools profile; window set by `qc.tss_matrix`) |  |
 | `contamination_rate (% of clean)` | fraction of clean reads aligning to the contaminant genome (only with `contamination.enabled`) | |
+| `subnucleosomal_rate (% of fragments < 120bp)` | share of deduplicated PE fragments shorter than 120 bp (sub-nucleosomal; samtools stats; empty for SE). In CUT&Tag a high share close to the IgG control points to an open-chromatin (Tn5) bias; distribution in `qc/figures/fragment_length.*` | |
 
 ---
 
