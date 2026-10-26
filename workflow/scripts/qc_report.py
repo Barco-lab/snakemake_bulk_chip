@@ -5,6 +5,7 @@
   outlier 与本批样本比较，|值 - 中位数| > 3 x MAD（x 1.4826）标为橙色
 重复一致性的数据与图来自 results/qc/replicates/（replicate_qc.py 计算，replicate_plots.R 绘图）。
 """
+import base64
 import html
 import json
 import re
@@ -382,6 +383,14 @@ def inline_svg(path, prefix):
     return re.sub(r'(<svg[^>]*?) width="[^"]*" height="[^"]*"', r"\1", t, count=1)
 
 
+def fig_img(fig, path, k):
+    """散点矩阵的点为位图，内嵌 PNG（位图在 cairo SVG 中的显示因浏览器而异）；其它图内嵌 SVG。"""
+    if fig == "correlation_scatter":
+        png = base64.b64encode(Path(path).with_suffix(".png").read_bytes()).decode()
+        return f'<img src="data:image/png;base64,{png}" alt="">'
+    return inline_svg(path, f"f{k}")
+
+
 def rep_fmt(key, v):
     if pd.isna(v):
         return ""
@@ -446,6 +455,17 @@ if REP:
              f"shows the groups. {cons_en} A sequential viridis scale runs from the lowest r to 1: correlations between samples are all positive, so a "
              "diverging scale centred on 0 would waste half of its range and hide differences among high correlations."),
         ),
+        "correlation_scatter": (
+            ("样本间相关性散点矩阵", "Scatter-plot matrix of ChIP signal between samples"),
+            ("下三角：每个点为一个 consensus peak，坐标为两个样本 IP 计数的 log2(CPM + 1)（不扣除 input）"
+             + (f"；共 {n_cons} 个 peak，随机抽取 {rinfo['scatter_peaks']:,} 个作图" if rinfo["scatter_peaks"] < rinfo["consensus_peaks"] else "")
+             + f"，虚线为 y = x。上三角：{method} 相关系数（基于全部 consensus peak，与相关性热图相同），底色与热图同一色标。"
+             "对角：样本名，颜色表示分组。样本按分组排列。",
+             "Lower triangle: each point is one consensus peak, plotted as log2(CPM + 1) of the IP counts of two samples (input not subtracted)"
+             + (f"; {rinfo['scatter_peaks']:,} of the {n_cons} peaks are drawn at random" if rinfo["scatter_peaks"] < rinfo["consensus_peaks"] else "")
+             + f"; the dashed line is y = x. Upper triangle: {method} correlation over all consensus peaks (as in the correlation heatmap), "
+             "shaded with the heatmap's scale. Diagonal: sample names coloured by group. Samples are ordered by group."),
+        ),
         "pca": (
             ("主成分分析", "Principal component analysis of ChIP signal"),
             (f"基于方差最大的 {rinfo['pca_peaks']} 个 consensus peak 上 IP 计数的 log2(CPM + 1)（中心化，未标准化）；坐标轴括号内为解释的方差比例，点旁为重复编号。",
@@ -472,6 +492,21 @@ if REP:
              "(shared bases / union)."
              + (f" Groups with more than 4 replicates ({names(big_groups)}) are not drawn; see the Jaccard figure." if big_groups else "")),
         ),
+        "group_venn": (
+            ("组间 peak 覆盖碱基的 Venn 图", "Venn diagrams of bases covered by the peaks of different groups"),
+            (f"每张小图比较几个组。每个区域的数字为只被这几个组的 reproducible peak 覆盖的碱基数（Mb，bedtools multiinter），颜色按同一数值着色；"
+             f"reproducible peak 为组内至少 {rinfo['min_reps']} 个重复中出现的区域（DiffBind 组内 consensus），只有 1 个样本的组用该样本的 peak。"
+             "一个圆（椭圆）内各区域之和即该组 reproducible peak 覆盖的总碱基数。区域面积不按比例。"
+             "peak 集合的差别也受测序深度和重复数影响，定量比较请用差异分析（diffbind.rds）。"
+             "比较哪些组由配置 replicates.group_venn 指定（为空时共 2–4 个组则全部比较）。",
+             "Each panel compares a few groups. Each number is the number of bases (Mb, bedtools multiinter) covered by the reproducible "
+             f"peaks of exactly those groups, and the colour encodes the same value; reproducible peaks are regions found in at least "
+             f"{rinfo['min_reps']} replicates of a group (DiffBind within-group consensus), and a single-sample group uses that sample's peaks. "
+             "The regions inside a circle (ellipse) add up to the bases covered by that group. Areas are not to scale. Differences "
+             "between peak sets also reflect depth and replicate numbers; use differential analysis (diffbind.rds) for quantitative "
+             "comparisons. The groups compared are set by replicates.group_venn in the config (when empty, all groups are compared "
+             "if there are 2–4)."),
+        ),
         "sex": (
             ("根据 chrX、chrY reads 占比推断性别", "Sex inferred from the fraction of reads on chrX and chrY"),
             (f"两轴均为占全部比对 reads（过滤 MAPQ ≥ {rinfo['mapq']} 并去重后）的百分比。纵轴只统计 chrY 计数区 {rinfo['y_region']}"
@@ -497,7 +532,7 @@ if REP:
         links = " · ".join(f'<a href="replicates/figures/{fig}.{x}" target="_blank">{x.upper()}</a>' for x in ("pdf", "png", "svg"))
         figs_html.append(
             f'<figure class="card apa" id="fig-{fig}"><div class="fig-label">{L(f"图 {k}", f"Figure {k}")}</div>'
-            f'<div class="fig-title">{L(tz, te)}</div><div class="fig-img">{inline_svg(path, f"f{k}")}</div>'
+            f'<div class="fig-title">{L(tz, te)}</div><div class="fig-img">{fig_img(fig, path, k)}</div>'
             f'<figcaption><i>{L("注：", "Note.")}</i> {L(nz, ne)}</figcaption><div class="muted dl">{links}</div></figure>'
         )
 
@@ -559,7 +594,8 @@ if REP:
     ))
     rep_points = "".join(f"<li>{L(zh, en)}</li>" for zh, en in rp)
     tsvs = " · ".join(f'<a href="replicates/{f}" target="_blank">{f}</a>'
-                      for f in ("samples.tsv", "groups.tsv", "peak_overlap.tsv", "peak_venn.tsv", "correlation.tsv", "pca.tsv", "peak_counts.tsv"))
+                      for f in ("samples.tsv", "groups.tsv", "peak_overlap.tsv", "peak_venn.tsv", "group_venn.tsv", "correlation.tsv",
+                                "log2cpm.tsv", "pca.tsv", "peak_counts.tsv"))
     rep_html = f"""
 <section id="replicates">
   <h2>{L("重复一致性", "Replicate consistency")}</h2>
@@ -695,7 +731,7 @@ figure.apa { margin: 0 0 20px; }
 .fig-label { font-weight: 700; }
 .fig-title { font-style: italic; margin-bottom: 12px; }
 .fig-img { background: #fff; border-radius: 12px; padding: 8px; max-width: 880px; }
-.fig-img svg { width: 100%; height: auto; display: block; }
+.fig-img svg, .fig-img img { width: 100%; height: auto; display: block; }
 figure.apa figcaption { margin-top: 12px; font-size: 13px; max-width: 880px; }
 .dl { margin-top: 6px; }
 @media (max-width: 860px) {

@@ -134,6 +134,62 @@ if ("correlation" %in% figures) {
 }
 
 # ------------------------------------------------------------
+# 相关性散点矩阵：下三角为两样本在 consensus peak 上的 log2(CPM + 1)（peak 多时随机抽 info$scatter_peaks 个作图），
+#   上三角为相关系数（基于全部 consensus peak，与热图相同，底色用热图的色板），对角为样本名（按分组着色）。
+#   点用 scattermore 栅格化，文件大小与点数无关；样本按分组排列
+# ------------------------------------------------------------
+if ("correlation_scatter" %in% figures) {
+  logc <- read.delim(snakemake@input[["log2cpm"]], row.names = 1, check.names = FALSE)
+  cor <- as.matrix(read.delim(snakemake@input[["correlation"]], row.names = 1, check.names = FALSE))
+  g_of <- setNames(as.character(per$group), per$sample)
+  ss <- colnames(logc)[order(match(g_of[colnames(logc)], groups))]
+  n <- length(ss)
+  set.seed(1)
+  keep <- sample(nrow(logc), info$scatter_peaks)
+  sub <- logc[keep, ss, drop = FALSE]
+  lim <- range(as.matrix(sub))
+  ij <- expand.grid(i = seq_len(n), j = seq_len(n))
+  low <- ij[ij$i > ij$j, ]  # 第 i 行（纵轴）、第 j 列（横轴）
+  pts <- do.call(rbind, lapply(seq_len(nrow(low)), function(k) {
+    data.frame(row = ss[low$i[k]], col = ss[low$j[k]], x = sub[[ss[low$j[k]]]], y = sub[[ss[low$i[k]]]])
+  }))
+  up <- ij[ij$i < ij$j, ]
+  rt <- data.frame(row = ss[up$i], col = ss[up$j], r = cor[cbind(ss[up$i], ss[up$j])])
+  lo <- floor(min(cor) * 100) / 100
+  rt$dark <- rt$r < (lo + 1) / 2  # viridis 低端颜色深，用白字
+  dg <- data.frame(row = ss, col = ss, group = factor(g_of[ss], levels = all_groups),
+                   label = sub("_(rep[0-9]+)$", "\n\\1", ss, ignore.case = TRUE))  # 末尾的 _repN 换行
+  lv <- function(d) transform(d, row = factor(row, levels = ss), col = factor(col, levels = ss))
+  pts <- lv(pts); rt <- lv(rt); dg <- lv(dg)
+  mid <- mean(lim)
+  method <- if (info$method == "spearman") "Spearman" else "Pearson"
+  p <- ggplot() +
+    geom_rect(data = rt, aes(fill = r), xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf) +
+    geom_text(data = rt[rt$dark, ], aes(label = sprintf("%.2f", r)), x = mid, y = mid, colour = "white",
+              size = 8 / .pt, family = font) +
+    geom_text(data = rt[!rt$dark, ], aes(label = sprintf("%.2f", r)), x = mid, y = mid, colour = "black",
+              size = 8 / .pt, family = font) +
+    geom_abline(data = unique(pts[c("row", "col")]), aes(slope = 1, intercept = 0), colour = "grey60",
+                linewidth = 0.2, linetype = "dashed") +  # 只画在下三角
+    scattermore::geom_scattermore(data = pts, aes(x, y), pointsize = 1.2, alpha = 0.15, colour = "grey15",
+                                  pixels = c(256, 256)) +
+    geom_text(data = dg, aes(label = label, colour = group), x = mid, y = mid, size = 7 / .pt, family = font,
+              lineheight = 0.9, show.legend = FALSE) +
+    scale_colour_manual(values = group_col, drop = FALSE) +
+    scale_fill_viridis_c(limits = c(lo, 1), name = paste(method, "r"),
+                         guide = guide_colourbar(display = "rectangles", nbin = 50)) +
+    facet_grid(row ~ col) +
+    coord_cartesian(xlim = lim, ylim = lim) +
+    labs(x = "log2(CPM + 1)", y = "log2(CPM + 1)") +
+    theme_apa +
+    theme(strip.text = element_blank(), panel.spacing = unit(0.08, "lines"),
+          panel.border = element_rect(colour = "grey70", fill = NA, linewidth = 0.3),
+          axis.line = element_blank(), panel.grid = element_blank(), axis.text = element_text(size = 6))
+  w <- max(6.9, 0.55 * n + 1.2)  # 每格约 0.55 in；样本多时放大，报告中按宽度缩放
+  save_fig(p, "correlation_scatter", w, w - 0.6)
+}
+
+# ------------------------------------------------------------
 # PCA
 # ------------------------------------------------------------
 if ("pca" %in% figures) {
@@ -174,11 +230,11 @@ if ("peak_overlap" %in% figures) {
 }
 
 # ------------------------------------------------------------
-# peak 重现性 Venn：组内各重复组合独有的碱基数（bedtools multiinter），面积不按比例
-#   2、3 个重复用圆，4 个重复用椭圆（经典四椭圆布局）；每个区域用 polyclip 求出多边形，
+# Venn（组内各重复 / 组间各组）：各组合独有的碱基数（bedtools multiinter），面积不按比例
+#   2、3 个集合用圆，4 个集合用椭圆（经典四椭圆布局）；每个区域用 polyclip 求出多边形，
 #   按碱基数着色（viridis），数字放在区域内离边界最远的点（四椭圆用固定位置）
 # ------------------------------------------------------------
-if ("peak_venn" %in% figures) {
+if (any(c("peak_venn", "group_venn") %in% figures)) {
   ellipse <- function(x, y, w, h, angle = 0, k = 360) {
     t <- seq(0, 2 * pi, length.out = k + 1)[-1]
     a <- angle * pi / 180
@@ -211,68 +267,86 @@ if ("peak_venn" %in% figures) {
     g[which.max(d), ]
   }
 
+  # d：facet（每张小图）、members（逗号分隔的集合组合）、bp；sets：每张小图的集合（按顺序）；set_label：集合名的显示
+  draw_venn <- function(d, sets, set_label, name) {
+    facets <- names(sets)
+    regions <- list(); labels <- list(); outlines <- list(); set_names <- list()
+    for (g in facets) {
+      ss <- sets[[g]]
+      lay <- layouts[[as.character(length(ss))]]
+      sub <- d[d$facet == g, ]
+      for (j in seq_len(nrow(sub))) {
+        inside <- ss %in% strsplit(sub$members[j], ",")[[1]]
+        reg <- lay$shapes[which(inside)[1]]
+        for (k in which(inside)[-1]) reg <- polyclip::polyclip(reg, lay$shapes[k], op = "intersection")
+        for (k in which(!inside)) reg <- polyclip::polyclip(reg, lay$shapes[k], op = "minus")
+        if (!length(reg)) next
+        id <- paste(g, sub$members[j])
+        for (ci in seq_along(reg)) {
+          regions[[length(regions) + 1]] <- data.frame(group = g, id = id, part = paste(id, ci),
+                                                       x = reg[[ci]]$x, y = reg[[ci]]$y, bp = sub$bp[j])
+        }
+        key <- paste(as.integer(inside), collapse = "")
+        xy <- if (!is.null(lay$pos)) {
+          data.frame(x = lay$pos[[key]][1], y = lay$pos[[key]][2])
+        } else {
+          label_point(reg[[which.max(vapply(reg, area, 0))]])
+        }
+        labels[[length(labels) + 1]] <- cbind(xy, group = g, bp = sub$bp[j])
+      }
+      for (k in seq_along(ss)) {
+        outlines[[length(outlines) + 1]] <- data.frame(group = g, id = k, x = lay$shapes[[k]]$x, y = lay$shapes[[k]]$y)
+      }
+      set_names[[g]] <- cbind(lay$names, group = g, label = set_label(ss, g))
+    }
+    regions <- do.call(rbind, regions); labels <- do.call(rbind, labels)
+    outlines <- do.call(rbind, outlines); set_names <- do.call(rbind, set_names)
+    for (v in c("regions", "labels", "outlines", "set_names")) {
+      x <- get(v); x$group <- factor(x$group, levels = facets); assign(v, x)
+    }
+    regions$mb <- regions$bp / 1e6
+    labels$mb <- labels$bp / 1e6
+    hi_mb <- max(regions$mb)
+    labels$text <- ifelse(labels$mb >= 10, sprintf("%.1f", labels$mb), sprintf("%.2f", labels$mb))
+    labels$dark <- labels$mb < hi_mb / 2  # viridis 低端颜色深，用白字
+
+    ncol <- min(3, length(facets))
+    nrow <- ceiling(length(facets) / ncol)
+    p <- ggplot() +
+      geom_polygon(data = regions, aes(x, y, group = part, fill = mb)) +
+      geom_polygon(data = outlines, aes(x, y, group = interaction(group, id)), fill = NA, colour = "black",
+                   linewidth = 0.3) +
+      geom_text(data = labels, aes(x, y, label = text, colour = dark), size = 8 / .pt, family = font, show.legend = FALSE) +
+      geom_text(data = set_names, aes(x, y, label = label), size = 8 / .pt, family = font) +
+      scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "black")) +
+      scale_fill_viridis_c(name = "Mb", limits = c(0, hi_mb),
+                           guide = guide_colourbar(display = "rectangles", nbin = 50, barwidth = unit(2.5, "in"),
+                                                   barheight = unit(0.12, "in"), title.vjust = 0.9)) +
+      facet_wrap(~group, ncol = ncol) +
+      coord_fixed(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE) +
+      theme_void(base_size = 10, base_family = font) +
+      theme(strip.text = element_text(size = 9, margin = margin(b = 2)),
+            legend.title = element_text(size = 9), legend.text = element_text(size = 8),
+            panel.spacing = unit(0.4, "lines"), legend.position = "bottom")
+    # 色标放在下方，横向留给各组的图；高度按每格接近正方形
+    save_fig(p, name, 6.9, 0.7 + 6.9 / ncol * 1.02 * nrow)
+  }
+}
+
+# peak 重现性：组内各重复
+if ("peak_venn" %in% figures) {
   venn <- read.delim(snakemake@input[["venn"]], check.names = FALSE)
   vg <- unlist(snakemake@params[["venn_groups"]])
-  regions <- list(); labels <- list(); outlines <- list(); set_names <- list()
-  for (g in vg) {
-    ss <- info$groups[[g]]
-    lay <- layouts[[as.character(length(ss))]]
-    sub <- venn[venn$group == g, ]
-    for (j in seq_len(nrow(sub))) {
-      inside <- ss %in% strsplit(sub$samples[j], ",")[[1]]
-      reg <- lay$shapes[which(inside)[1]]
-      for (k in which(inside)[-1]) reg <- polyclip::polyclip(reg, lay$shapes[k], op = "intersection")
-      for (k in which(!inside)) reg <- polyclip::polyclip(reg, lay$shapes[k], op = "minus")
-      if (!length(reg)) next
-      id <- paste(g, sub$samples[j])
-      for (ci in seq_along(reg)) {
-        regions[[length(regions) + 1]] <- data.frame(group = g, id = id, part = paste(id, ci),
-                                                     x = reg[[ci]]$x, y = reg[[ci]]$y, bp = sub$bp[j])
-      }
-      key <- paste(as.integer(inside), collapse = "")
-      xy <- if (!is.null(lay$pos)) {
-        data.frame(x = lay$pos[[key]][1], y = lay$pos[[key]][2])
-      } else {
-        label_point(reg[[which.max(vapply(reg, area, 0))]])
-      }
-      labels[[length(labels) + 1]] <- cbind(xy, group = g, bp = sub$bp[j])
-    }
-    for (k in seq_along(ss)) {
-      outlines[[length(outlines) + 1]] <- data.frame(group = g, id = k, x = lay$shapes[[k]]$x, y = lay$shapes[[k]]$y)
-    }
-    set_names[[g]] <- cbind(lay$names, group = g, label = short_label(ss, g))
-  }
-  regions <- do.call(rbind, regions); labels <- do.call(rbind, labels)
-  outlines <- do.call(rbind, outlines); set_names <- do.call(rbind, set_names)
-  for (d in c("regions", "labels", "outlines", "set_names")) {
-    x <- get(d); x$group <- factor(x$group, levels = vg); assign(d, x)
-  }
-  regions$mb <- regions$bp / 1e6
-  labels$mb <- labels$bp / 1e6
-  hi_mb <- max(regions$mb)
-  labels$text <- ifelse(labels$mb >= 10, sprintf("%.1f", labels$mb), sprintf("%.2f", labels$mb))
-  labels$dark <- labels$mb < hi_mb / 2  # viridis 低端颜色深，用白字
+  draw_venn(data.frame(facet = venn$group, members = venn$samples, bp = venn$bp),
+            info$groups[vg], short_label, "peak_venn")
+}
 
-  ncol <- min(3, length(vg))
-  nrow <- ceiling(length(vg) / ncol)
-  p <- ggplot() +
-    geom_polygon(data = regions, aes(x, y, group = part, fill = mb)) +
-    geom_polygon(data = outlines, aes(x, y, group = interaction(group, id)), fill = NA, colour = "black",
-                 linewidth = 0.3) +
-    geom_text(data = labels, aes(x, y, label = text, colour = dark), size = 8 / .pt, family = font, show.legend = FALSE) +
-    geom_text(data = set_names, aes(x, y, label = label), size = 8 / .pt, family = font) +
-    scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "black")) +
-    scale_fill_viridis_c(name = "Mb", limits = c(0, hi_mb),
-                         guide = guide_colourbar(display = "rectangles", nbin = 50, barwidth = unit(2.5, "in"),
-                                                 barheight = unit(0.12, "in"), title.vjust = 0.9)) +
-    facet_wrap(~group, ncol = ncol) +
-    coord_fixed(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE) +
-    theme_void(base_size = 10, base_family = font) +
-    theme(strip.text = element_text(size = 9, margin = margin(b = 2)),
-          legend.title = element_text(size = 9), legend.text = element_text(size = 8),
-          panel.spacing = unit(0.4, "lines"), legend.position = "bottom")
-  # 色标放在下方，横向留给各组的图；高度按每格接近正方形
-  save_fig(p, "peak_venn", 6.9, 0.7 + 6.9 / ncol * 1.02 * nrow)
+# 组间：各组的 reproducible peak（只有 1 个样本的组用该样本的 peak）
+if ("group_venn" %in% figures) {
+  gv <- read.delim(snakemake@input[["group_venn"]], check.names = FALSE)
+  sets <- lapply(snakemake@params[["group_venn"]], unlist)
+  draw_venn(data.frame(facet = gv$comparison, members = gv$groups, bp = gv$bp),
+            sets, function(ss, g) ss, "group_venn")
 }
 
 # ------------------------------------------------------------

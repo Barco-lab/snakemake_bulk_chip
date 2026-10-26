@@ -9,13 +9,15 @@ def replicates_on():
 
 def replicate_figures():
     """报告中的图（不含扩展名）；条件不满足的图不画。"""
-    f = ["correlation"]
+    f = ["correlation", "correlation_scatter"]
     if len(PEAK_SAMPLES) >= 3:
         f.append("pca")
     if REP_GROUPS:
         f.append("peak_overlap")
     if venn_groups():
         f.append("peak_venn")
+    if group_venn_sets():
+        f.append("group_venn")
     if REPLICATES["sex_check"]:
         f.append("sex")
     return f
@@ -24,6 +26,20 @@ def replicate_figures():
 def venn_groups():
     """画 Venn 图的组：2–4 个重复（更多时 Venn 难以辨认，只看 Jaccard）。"""
     return [g for g in REP_GROUPS if len(GROUPS[g]) <= 4]
+
+
+def group_venn_sets():
+    """组间 Venn：{名称: [组]}；replicates.group_venn 为空时，共 2–4 个组则全部比较。"""
+    sets = REPLICATES.get("group_venn") or ([list(GROUPS)] if 2 <= len(GROUPS) <= 4 else [])
+    out = {}
+    for gs in sets:
+        bad = [g for g in gs if g not in GROUPS]
+        if bad:
+            raise ValueError(f"replicates.group_venn 中的组不存在（或不是 IP 样本的组）: {bad}，可选: {list(GROUPS)}")
+        if not 2 <= len(gs) <= 4 or len(set(gs)) != len(gs):
+            raise ValueError(f"replicates.group_venn 每项须为 2–4 个不同的组: {gs}")
+        out[" vs ".join(gs)] = list(gs)
+    return out
 
 
 def replicate_figure_files():
@@ -130,11 +146,14 @@ rule replicate_qc:
         groups="results/qc/replicates/groups.tsv",
         overlap="results/qc/replicates/peak_overlap.tsv",
         venn="results/qc/replicates/peak_venn.tsv",
+        group_venn="results/qc/replicates/group_venn.tsv",
         correlation="results/qc/replicates/correlation.tsv",
+        log2cpm="results/qc/replicates/log2cpm.tsv",
         pca="results/qc/replicates/pca.tsv",
         info="results/qc/replicates/info.json",
     params:
         samples=PEAK_SAMPLES,
+        group_venn=group_venn_sets(),
         groups=GROUPS,
         controls=CONTROLS,
         group_of=dict(zip(SAMPLES, SAMPLES_DF["group"])),
@@ -162,7 +181,9 @@ rule replicate_plots:
         groups="results/qc/replicates/groups.tsv",
         overlap="results/qc/replicates/peak_overlap.tsv",
         venn="results/qc/replicates/peak_venn.tsv",
+        group_venn="results/qc/replicates/group_venn.tsv",
         correlation="results/qc/replicates/correlation.tsv",
+        log2cpm="results/qc/replicates/log2cpm.tsv",
         pca="results/qc/replicates/pca.tsv",
         info="results/qc/replicates/info.json",
     output:
@@ -170,6 +191,7 @@ rule replicate_plots:
     params:
         figures=replicate_figures(),
         venn_groups=venn_groups(),
+        group_venn=group_venn_sets(),
         outdir="results/qc/replicates/figures",
     log:
         "<logs>/replicate_plots.log",

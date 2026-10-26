@@ -87,7 +87,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | mitochondria | kept by default (removed with `filter.remove_mito: true`); summary reports `mito_rate (chrM) (% of mapped)` |
 | macs3 | with control: `-c control --keep-dup all`<br>without control: `--nomodel --nolambda --extsize 200 --min-length 100`<br>broad: `--broad --broad-cutoff 0.1`; `-f BAMPE` for PE |
 | QC | FRiP, fingerprint, TSS profile / enrichment, fragment length distribution |
-| replicates | IP samples only. Pairwise Jaccard of replicate peaks and Venn diagrams of the bases covered by each replicate combination (bedtools multiinter, groups of 2–4 replicates); within-group consensus sets from DiffBind (reproducible peaks present in ≥ 2 replicates), merged across groups into consensus peaks and counted with `dba.count` on IP reads (input not subtracted; summit ± 200 bp for narrow, merged widths when broad groups are present), log2(CPM + 1) for correlation, clustering and PCA; sex of every sample (controls included) inferred from the fraction of mapped reads on chrX and chrY (called from the chrY region; chrX only compared within groups) |
+| replicates | IP samples only. Pairwise Jaccard of replicate peaks and Venn diagrams of the bases covered by each replicate combination (bedtools multiinter, groups of 2–4 replicates), and between groups using each group's reproducible peaks (`replicates.group_venn` sets the groups compared); within-group consensus sets from DiffBind (reproducible peaks present in ≥ 2 replicates), merged across groups into consensus peaks and counted with `dba.count` on IP reads (input not subtracted; summit ± 200 bp for narrow, merged widths when broad groups are present), log2(CPM + 1) for correlation (heatmap and scatter-plot matrix), clustering and PCA; sex of every sample (controls included) inferred from the fraction of mapped reads on chrX and chrY (called from the chrY region; chrX only compared within groups) |
 
 Other settings:
 - filtering keeps MAPQ ≥ 30 and removes secondary, supplementary and unmapped reads; PE keeps properly paired reads with both mates passing;
@@ -107,6 +107,7 @@ Other settings:
 | `filter.remove_mito` | Default false |
 | `macs3.qvalue` | Default 0.01 |
 | `bigwig.normalize` | `RPGC` (default) / `CPM` / `RPKM` / `BPM` / `None`; `bigwig.binsize` defaults to 10 |
+| `replicates.group_venn` | Groups compared in the between-group Venn diagrams: each item is 2–4 groups, e.g. `[[CBP_KA, CBP_NE, CBP_Saline], [p300_KA, p300_NE, p300_Saline]]`, one panel per item; when empty, all groups are compared if there are 2–4, otherwise none |
 | `bigwig.group` | One bigwig per group (IP groups only, controls are not merged), on by default; `method: merge` (default) merges the group's dedup BAMs and runs `bamCoverage`, `mean` averages the replicate bigwigs with `bigwigAverage` (equal weight per replicate). Only groups with ≥ 2 replicates left after `merge: no` are made.<br>You can first run with `enabled: false`, check the replicate QC, fill in the `merge` column, set `true` and run again: only the merging step is added. Changing the `merge` column later only redoes the affected groups |
 | `motif.enabled` | HOMER, only for non-control samples with narrow peaks; `motif.params` defaults to `"-nomotif"` (known motifs only); set it to `""` to add de novo motifs (lengths 8/10/12, much slower) |
 | `keep.raw_bam` | Default false: only the filtered, deduplicated BAM is kept |
@@ -142,7 +143,7 @@ project/
 │       ├── multiqc/multiqc_report.html  # ★ all QC in one report
 │       ├── bowtie2/{sample}.log         # alignment statistics
 │       ├── reference_check.txt          # chromosome naming check of index, blacklist and GTF
-│       ├── replicates/                  # replicate consistency: samples.tsv, groups.tsv, peak_overlap.tsv, peak_venn.tsv, correlation.tsv, pca.tsv,
+│       ├── replicates/                  # replicate consistency: samples.tsv, groups.tsv, peak_overlap.tsv, peak_venn.tsv, group_venn.tsv, correlation.tsv, log2cpm.tsv, pca.tsv,
 │       │                                #   peak_counts.tsv (consensus peak count matrix), diffbind.rds (DBA object for differential analysis); figures/ holds PDF, PNG (300 dpi) and SVG
 │       └── fastqc_*/  frip/  deeptools/  contamination/
 └── logs/

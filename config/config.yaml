@@ -121,6 +121,9 @@ replicates:
   # 性别（所有样本，含 control）：chrX、chrY 的 reads 占全部比对 reads（过滤去重后的 BAM）的比例
   #   chrY 只统计 references 中的 y_region（chrY 去掉 PAR），按 y_frac 阈值判定
   #   chrX 占比随抗体、细胞类型变化，只在组内比较、不用于判定；input 为全基因组 DNA，其 chrX 占比直接反映 X 拷贝数
+  # 组间 Venn：各组 reproducible peak（只有 1 个样本的组用该样本的 peak）覆盖碱基；每项为 2–4 个组（group 名），每项一张小图
+  #   留空时：共 2–4 个组就全部放在一张图里；超过 4 组不画
+  group_venn: []           # 如 [[CBP_KA, CBP_NE, CBP_Saline], [p300_KA, p300_NE, p300_Saline]]
   sex_check: true
   y_frac: [0.002, 0.01]    # y_region reads 占全部比对 reads 的百分比：< 0.002% 判为雌性，> 0.01% 判为雄性，之间无法判断
                            # （阈值按 ATAC 雌性数据定，未用雄性样本验证）

@@ -87,7 +87,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | 线粒体 | 默认保留（`filter.remove_mito: true` 时去除），summary 中报告 `mito_rate (chrM) (% of mapped)` |
 | macs3 | 有对照：`-c control --keep-dup all`<br>无对照：`--nomodel --nolambda --extsize 200 --min-length 100`<br>broad：`--broad --broad-cutoff 0.1`；PE 用 `-f BAMPE` |
 | QC | FRiP、fingerprint、TSS profile / enrichment、片段长度分布 |
-| 重复一致性 | 只比较 IP 样本。组内重复两两 peak 的 Jaccard，及各重复组合独有碱基数的 Venn 图（bedtools multiinter，2–4 个重复的组）；用 DiffBind 求各组组内 consensus（在 ≥ 2 个重复中出现的 reproducible peak），各组取并集为 consensus peak，`dba.count` 计数 IP（不扣除 input；narrow 取峰顶 ± 200 bp，有 broad 的组时保留原宽度）后以 log2(CPM + 1) 计算相关性、层次聚类和 PCA；按 chrX、chrY reads 占全部比对 reads 的比例推断所有样本（含对照）的性别（以 chrY 计数区判定，chrX 只在组内比较） |
+| 重复一致性 | 只比较 IP 样本。组内重复两两 peak 的 Jaccard，及各重复组合独有碱基数的 Venn 图（bedtools multiinter，2–4 个重复的组）；组间同样用各组 reproducible peak 画 Venn 图（`replicates.group_venn` 指定比较哪些组）；用 DiffBind 求各组组内 consensus（在 ≥ 2 个重复中出现的 reproducible peak），各组取并集为 consensus peak，`dba.count` 计数 IP（不扣除 input；narrow 取峰顶 ± 200 bp，有 broad 的组时保留原宽度）后以 log2(CPM + 1) 计算相关性（热图与散点矩阵）、层次聚类和 PCA；按 chrX、chrY reads 占全部比对 reads 的比例推断所有样本（含对照）的性别（以 chrY 计数区判定，chrX 只在组内比较） |
 
 其它设置：
 - 过滤条件为 MAPQ ≥ 30，并去掉 secondary、supplementary、unmapped reads；PE 只保留两端都合格的 properly paired；
@@ -107,6 +107,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | `filter.remove_mito` | 默认 false |
 | `macs3.qvalue` | 默认 0.01 |
 | `bigwig.normalize` | `RPGC`（默认）/ `CPM` / `RPKM` / `BPM` / `None`；`bigwig.binsize` 默认 10 |
+| `replicates.group_venn` | 组间 Venn 图比较哪些组：每项为 2–4 个组，如 `[[CBP_KA, CBP_NE, CBP_Saline], [p300_KA, p300_NE, p300_Saline]]`，每项一张小图；留空时共 2–4 个组则全部比较，超过 4 组不画 |
 | `bigwig.group` | 每组一个 bigwig（IP 样本的组，对照不合并），默认开启；`method: merge`（默认）合并组内去重后的 BAM 再 `bamCoverage`，`mean` 用 `bigwigAverage` 对各重复的 bigwig 取平均（每个重复权重相同）。只生成去掉 `merge: no` 后仍有 ≥ 2 个重复的组。<br>可以先设 `enabled: false` 只跑单个样本，看过重复一致性后标记 `merge` 列、改为 `true` 再运行，只会新增合并这一步；之后修改 `merge` 列也只重做受影响的组 |
 | `motif.enabled` | HOMER，仅对 narrow peak 的非 control 样本；`motif.params` 默认 `"-nomotif"`，只做已知 motif；改为 `""` 同时做 de novo（长度 8/10/12，慢很多） |
 | `keep.raw_bam` | 默认 false：只保留过滤去重后的 BAM |
@@ -142,7 +143,7 @@ project/
 │       ├── multiqc/multiqc_report.html  # ★ 所有 QC 汇总
 │       ├── bowtie2/{sample}.log         # 比对统计
 │       ├── reference_check.txt          # index、blacklist、GTF 染色体命名检查
-│       ├── replicates/                  # 重复一致性：samples.tsv、groups.tsv、peak_overlap.tsv、peak_venn.tsv、correlation.tsv、pca.tsv、
+│       ├── replicates/                  # 重复一致性：samples.tsv、groups.tsv、peak_overlap.tsv、peak_venn.tsv、group_venn.tsv、correlation.tsv、log2cpm.tsv、pca.tsv、
 │       │                                #   peak_counts.tsv（consensus peak 计数矩阵）、diffbind.rds（DBA 对象，可接着做差异分析）；figures/ 下为 PDF、PNG（300 dpi）、SVG
 │       └── fastqc_*/  frip/  deeptools/  contamination/
 └── logs/
