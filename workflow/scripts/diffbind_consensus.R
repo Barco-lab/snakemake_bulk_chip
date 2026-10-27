@@ -84,8 +84,10 @@ message(sprintf("consensus（各组并集）%d 个区域，中位宽度 %d bp", 
 obj <- dba.count(obj, peaks = consensus, summits = summits, filter = 0, minOverlap = 1,
                  score = DBA_SCORE_READS, bSubControl = FALSE, bRemoveDuplicates = FALSE,
                  bParallel = snakemake@threads > 1)
-counts <- dba.peakset(obj, bRetrieve = TRUE, DataType = DBA_DATA_FRAME)
-names(counts)[1:3] <- c("Chr", "Start", "End")
+gr <- dba.peakset(obj, bRetrieve = TRUE)
+# 不用 DBA_DATA_FRAME：其 as.data.frame 会把样本名中的 "-" 改成 "."
+counts <- data.frame(Chr = as.character(seqnames(gr)), Start = start(gr), End = end(gr),
+                     as.data.frame(mcols(gr), optional = TRUE), check.names = FALSE)
 counts <- counts[order(match(counts$Chr, seqlevels(consensus)), counts$Start), ]
 # 输出 consensus.bed 为计数所用的区域（summits 时为峰顶 ± summits bp）
 to_bed(GRanges(counts$Chr, IRanges(counts$Start, counts$End)), snakemake@output[["consensus"]])
