@@ -15,6 +15,8 @@ rate 以进入该步骤的 reads 为分母（与各软件报告、ENCODE 标准�
   tss_enrichment      TSS 中心信号 / 两端 flank 信号（deeptools profile）
   contamination_rate  trim 后 reads 比对到污染物种的比例（contamination.enabled 时）
   subnucleosomal_rate 去重后 PE 片段中长度 < 120 bp 的比例（samtools stats 的 IS 段；SE 样本为空）
+  size_factor         bigwig 的 DESeq2 size factor（bigwig.normalize 含 deseq2_peaks / deseq2_background 时；
+                      括号内为 SFpeaks / SFbg；control 样本为空）
 表头括号内为对应的 config 值与分母。输出纯数字，MultiQC 与 qc_report 读取。
 另输出 fragment_length.tsv（PE 样本每个片段长度的片段数与占比），供 fragment_plot 绘图。
 """
@@ -100,6 +102,11 @@ for fp in inp.frip:
     r = pd.read_csv(fp, sep="\t").iloc[0]
     frip[r["sample"]] = r["frip"]
 peaks = {s: sum(1 for _ in open(p)) for s, p in zip(snakemake.params.peak_samples, inp.peaks)}
+# DESeq2 size factor：{列名: {样本: size factor}}
+sfs = {
+    f"size_factor ({tag})": pd.read_csv(fp, sep="\t").set_index("sample")["size_factor"].to_dict()
+    for tag, fp in zip(snakemake.params.sf_tags, inp.size_factors)
+}
 contam = {}
 for fp in inp.contam:
     contam[Path(fp).stem] = bowtie2_stats(fp)
@@ -155,6 +162,7 @@ for i, s in enumerate(snakemake.params.samples):
         C_TSS: tss.get(s),
         C_CONTAM: contam[s][1] if s in contam else None,
         C_SUB: pct(frag[s][frag[s].index < SUBNUC].sum(), frag[s].sum()) if s in frag else None,
+        **{c: v.get(s) for c, v in sfs.items()},
     }
     rows.append(row)
 
@@ -169,7 +177,7 @@ count_cols = [c for c in df.columns if "_reads" in c or c == "peaks"]
 for c in df.columns:
     if "(%" in c:
         df[c] = df[c].astype(float).round(2)
-    elif c == "frip" or c == C_TSS:
+    elif c == "frip" or c == C_TSS or c in sfs:
         df[c] = df[c].astype(float).round(4)
     elif c in count_cols:
         df[c] = df[c].astype("Int64")

@@ -106,7 +106,7 @@ Other settings:
 | `filter.mapq` | Default 30 |
 | `filter.remove_mito` | Default false |
 | `macs3.qvalue` | Default 0.01 |
-| `bigwig.normalize` | `RPGC` (default) / `CPM` / `RPKM` / `BPM` / `None`; `bigwig.binsize` defaults to 10 |
+| `bigwig.normalize` | One or more methods (a list), one `{sample}.{method}.bw` each; the first is used for the QC figures: `RPGC` (default) / `CPM` / `RPKM` / `BPM` / `None` (`bamCoverage --normalizeUsing`); `deseq2_peaks` (`.SFpeaks.bw`, consensus peak counts) / `deseq2_background` (`.SFbg.bw`, genome-wide bins of `bigwig.background_bin`, default 10 kb) use DESeq2 size factors (median-of-ratios, assuming most regions are unchanged between samples; IP samples only), coverage divided by the size factor; values in `04_bigwig/size_factors.{SFpeaks,SFbg}.tsv` and summary.tsv. `bigwig.binsize` defaults to 10 |
 | `replicates.group_venn` | Groups compared in the between-group Venn diagrams: each item is 2–4 groups, e.g. `[[CBP_KA, CBP_NE, CBP_Saline], [p300_KA, p300_NE, p300_Saline]]`, one panel per item; when empty, all groups are compared if there are 2–4, otherwise none |
 | `bigwig.group` | One bigwig per group (IP groups only, controls are not merged), on by default; `method: merge` (default) merges the group's dedup BAMs and runs `bamCoverage`, `mean` averages the replicate bigwigs with `bigwigAverage` (equal weight per replicate). Only groups with ≥ 2 replicates left after `merge: no` are made.<br>You can first run with `enabled: false`, check the replicate QC, fill in the `merge` column, set `true` and run again: only the merging step is added. Changing the `merge` column later only redoes the affected groups |
 | `motif.enabled` | HOMER, only for non-control samples with narrow peaks; `motif.params` defaults to `"-nomotif"` (known motifs only); set it to `""` to add de novo motifs (lengths 8/10/12, much slower) |
@@ -134,8 +134,9 @@ project/
 │   ├── 03_peaks/macs3/{sample}/         # raw macs3 output (xls, summits, etc.)
 │   ├── 03_peaks/reproducible/{group}.bed  # peaks present in at least min_reps replicates (column 4: number of replicates)
 │   ├── 03_peaks/consensus.bed           # union of the reproducible peaks of all groups (DiffBind; summit ± summits bp for narrow)
-│   ├── 04_bigwig/{sample}.bw            # ★
-│   ├── 04_bigwig/groups/{group}.bw      # ★ merged bigwig per group
+│   ├── 04_bigwig/{sample}.{norm}.bw     # ★ {norm} is the normalization (RPGC, CPM, SFpeaks, SFbg, ...)
+│   ├── 04_bigwig/groups/{group}.{norm}.bw  # ★ merged bigwig per group (for size factors: mean of the members' normalized signal)
+│   ├── 04_bigwig/size_factors.{SFpeaks,SFbg}.tsv  # DESeq2 size factors (when used)
 │   ├── 05_motif/{sample}/               # HOMER (optional)
 │   ├── 02_align/{sample}.dedup.bam      # filtered, deduplicated BAM ({sample}.raw.bam is the raw bowtie2 alignment); stats/ holds flagstat, idxstats, markdup, samtools stats
 │   ├── 01_trim/reports/                 # trim_galore reports

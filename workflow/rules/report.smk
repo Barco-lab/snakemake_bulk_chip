@@ -40,6 +40,7 @@ rule summary:
         filtered=expand("results/02_align/stats/{sample}.filtered.flagstat", sample=SAMPLES),
         final=expand("results/02_align/stats/{sample}.dedup.flagstat", sample=SAMPLES),
         frip=expand("results/qc/frip/{sample}.tsv", sample=PEAK_SAMPLES),
+        size_factors=expand("results/04_bigwig/size_factors.{tag}.tsv", tag=[t for t in BW_TAGS if BW_NORM_OF[t] in BW_SF]),
         peaks=[peak_file(s) for s in PEAK_SAMPLES],
         contam=(
             expand("results/qc/contamination/{sample}.log", sample=SAMPLES)
@@ -65,6 +66,7 @@ rule summary:
         mapq=config["filter"]["mapq"],
         mito=MITO,
         tss_matrix=config["qc"]["tss_matrix"],
+        sf_tags=[t for t in BW_TAGS if BW_NORM_OF[t] in BW_SF],
     log:
         "<logs>/summary.log",
     script:
@@ -157,6 +159,31 @@ def group_bigwig_desc():
     return zh, en
 
 
+def bigwig_desc():
+    """设置表的 bigwig 一行：每种归一化一句，注明 QC 图用哪一种。"""
+    b = config["bigwig"]
+    zh, en = [], []
+    for tag, norm in BW_NORM_OF.items():
+        if norm == "deseq2_peaks":
+            z, e = "DESeq2 size factor（consensus peak 计数）", "DESeq2 size factor (consensus peak counts)"
+        elif norm == "deseq2_background":
+            z = f"DESeq2 size factor（全基因组 {b['background_bin']} bp bin 计数）"
+            e = f"DESeq2 size factor (genome-wide {b['background_bin']} bp bin counts)"
+        else:
+            z = e = f"`--normalizeUsing {norm}`"
+        zh.append(f"`{tag}.bw`：{z}")
+        en.append(f"`{tag}.bw`: {e}")
+    sf = any(n in BW_SF for n in BW_NORMS)
+    return (
+        f"`--binSize {b['binsize']}`，排除 blacklist；" + "；".join(zh)
+        + ("（size factor 为 median-of-ratios，只做 IP 样本，`--scaleFactor 1 / size factor`）" if sf else "")
+        + f"；QC 图用 `{BW_TAG}`",
+        f"`--binSize {b['binsize']}`, blacklist excluded; " + "; ".join(en)
+        + (" (median-of-ratios size factors, IP samples only, `--scaleFactor 1 / size factor`)" if sf else "")
+        + f"; QC figures use `{BW_TAG}`",
+    )
+
+
 def report_settings():
     """QC 报告「流程与参数」中的参数表：(中文名, 英文名, 中文取值, 英文取值)，取值中 `...` 显示为代码。"""
     c, ref, m = config, REF, config["macs3"]
@@ -187,8 +214,7 @@ def report_settings():
         ("MACS3", "MACS3",
          f"q < {m['qvalue']}；有对照 `{m['chip_control']}`；无对照 `{m['chip_no_control']}`；broad 另加 `{m['broad']}`",
          f"q < {m['qvalue']}; with control `{m['chip_control']}`; without `{m['chip_no_control']}`; broad adds `{m['broad']}`"),
-        ("bigwig", "bigwig", f"`--binSize {b['binsize']} --normalizeUsing {b['normalize']}`，排除 blacklist",
-         f"`--binSize {b['binsize']} --normalizeUsing {b['normalize']}`, blacklist excluded"),
+        ("bigwig", "bigwig", *bigwig_desc()),
         ("组 bigwig", "Group bigwig", *group_bigwig_desc()),
         ("TSS profile", "TSS profile", f"`{c['qc']['tss_matrix']}`" if c["qc"]["tss_profile"] else "不计算",
          f"`{c['qc']['tss_matrix']}`" if c["qc"]["tss_profile"] else "disabled"),
@@ -246,7 +272,8 @@ rule qc_report:
             tss=config["qc"]["tss_matrix"],
             metagene=config["qc"]["metagene_matrix"],
             min_len=config["qc"]["metagene_min_length"],
-            norm=config["bigwig"]["normalize"],
+            norm=BW_TAG,
+            controls=BW_TAG not in BW_SF.values(),
             group_method=BW_GROUP["method"],
         ),
     log:

@@ -118,6 +118,14 @@ metrics:
       zh: 无统一阈值。CUT&Tag 中亚核小体片段来自 Tn5 在开放 DNA 中切两次：组蛋白标记应以单核小体片段为主，比例高、接近 IgG 对照提示开放染色质（Tn5）偏好；ATAC-seq 中则本应较高。ChIP-seq 中取决于超声打断，不按此解读
       en: No consensus threshold. In CUT&Tag, sub-nucleosomal fragments come from two Tn5 cuts in open DNA; histone marks should be dominated by mono-nucleosomal fragments, so a high share close to the IgG control points to an open-chromatin (Tn5) bias. In ChIP-seq it reflects sonication and is not read this way
     outlier: true
+  size_factor:
+    desc:
+      zh: bigwig 的 DESeq2 size factor（median-of-ratios；括号内 SFpeaks 用 consensus peak 计数，SFbg 用全基因组 bin 计数）。.SFpeaks.bw / .SFbg.bw 为覆盖度除以它；对照样本不计算
+      en: DESeq2 size factor of the bigwig (median-of-ratios; SFpeaks from consensus peak counts, SFbg from genome-wide bin counts). .SFpeaks.bw / .SFbg.bw are coverage divided by it; not computed for controls
+    ref:
+      zh: 全部 IP 样本的几何平均为 1。反映测序深度（SFpeaks 还包括富集效率）；假设大多数区域在样本间不变，无法反映全局变化
+      en: Geometric mean of all IP samples is 1. Reflects sequencing depth (SFpeaks also enrichment efficiency); assumes most regions are unchanged, so global changes are not captured
+    outlier: false
 
 # 「重复一致性」一节的表格列（results/qc/replicates/samples.tsv、groups.tsv）；检查规则写在 qc_report.py 中
 replicates:

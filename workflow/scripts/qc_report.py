@@ -661,16 +661,18 @@ def n_lines(path):
 
 prof = p.profile
 prof_figs = []
+# size factor 方式的 bigwig 只有 IP 样本
+ctrl_zh, ctrl_en = ("包括对照", "controls included") if prof["controls"] else ("不含对照", "controls not included")
 if "prof_tss" in inp.keys():
     up, down = mx_opt(prof["tss"], ["-b", "--upstream", "--beforeRegionStartLength"], 500), mx_opt(prof["tss"], ["-a", "--downstream", "--afterRegionStartLength"], 500)
     n_tss = n_lines(inp.prof_tss_bed)
     prof_figs.append((
         "tss_profile", inp.prof_tss,
         ("TSS profile", "TSS profile"),
-        (f"每条线为一个样本（包括对照）在 {n_tss:,} 个 protein_coding 基因 TSS 上游 {up:,} bp 到下游 {down:,} bp 的平均信号"
+        (f"每条线为一个样本（{ctrl_zh}）在 {n_tss:,} 个 protein_coding 基因 TSS 上游 {up:,} bp 到下游 {down:,} bp 的平均信号"
          f"（bigwig，{prof['norm']} 归一化）。基因按 GTF 的链方向排列，左为上游。启动子标记和开放染色质在 TSS 处形成尖峰，"
          "对照（input / IgG）应接近平坦；汇总表中的 TSS enrichment 由此图的数据计算。",
-         f"Each line is the mean signal of one sample (controls included) from {up:,} bp upstream to {down:,} bp downstream of the "
+         f"Each line is the mean signal of one sample ({ctrl_en}) from {up:,} bp upstream to {down:,} bp downstream of the "
          f"TSS of {n_tss:,} protein_coding genes (bigwig, {prof['norm']} normalized). Genes are oriented by their GTF strand, "
          "upstream on the left. Promoter marks and open chromatin peak sharply at the TSS, while controls (input / IgG) should "
          "stay flat; the TSS enrichment in the summary table is computed from these data."),
@@ -693,10 +695,10 @@ if "prof_samples" in inp.keys():
     prof_figs.append((
         "metagene_samples", inp.prof_samples,
         ("Meta gene profile：每个样本", "Meta gene profile: per sample"),
-        (f"每条线为一个样本（包括对照）在 {genes_zh}上的平均信号（bigwig，{prof['norm']} 归一化）。{scale_zh}"
+        (f"每条线为一个样本（{ctrl_zh}）在 {genes_zh}上的平均信号（bigwig，{prof['norm']} 归一化）。{scale_zh}"
          "基因按 GTF 的链方向排列，左为 5′ 端。对照应接近平坦；启动子标记集中在 TSS，基因体标记（如 H3K36me3、H3K79me2）"
          "在基因体内升高。",
-         f"Each line is the mean signal of one sample (controls included) over {genes_en} (bigwig, {prof['norm']} normalized). "
+         f"Each line is the mean signal of one sample ({ctrl_en}) over {genes_en} (bigwig, {prof['norm']} normalized). "
          f"{scale_en} Genes are oriented by their GTF strand, 5′ end on the left. Controls should stay flat; promoter marks "
          "concentrate at the TSS, gene-body marks (e.g. H3K36me3, H3K79me2) rise across the gene body."),
     ))

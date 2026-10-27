@@ -106,7 +106,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | `filter.mapq` | 默认 30 |
 | `filter.remove_mito` | 默认 false |
 | `macs3.qvalue` | 默认 0.01 |
-| `bigwig.normalize` | `RPGC`（默认）/ `CPM` / `RPKM` / `BPM` / `None`；`bigwig.binsize` 默认 10 |
+| `bigwig.normalize` | 可写一个或多个（列表），每种生成一份 `{sample}.{方式}.bw`，第一个用于 QC 图：`RPGC`（默认）/ `CPM` / `RPKM` / `BPM` / `None`（`bamCoverage --normalizeUsing`）；`deseq2_peaks`（`.SFpeaks.bw`，consensus peak 计数）/ `deseq2_background`（`.SFbg.bw`，全基因组 `bigwig.background_bin` bin 计数，默认 10 kb）为 DESeq2 size factor（median-of-ratios，假设大多数区域在样本间不变；只做 IP 样本），覆盖度除以 size factor，值在 `04_bigwig/size_factors.{SFpeaks,SFbg}.tsv` 与 summary.tsv。`bigwig.binsize` 默认 10 |
 | `replicates.group_venn` | 组间 Venn 图比较哪些组：每项为 2–4 个组，如 `[[CBP_KA, CBP_NE, CBP_Saline], [p300_KA, p300_NE, p300_Saline]]`，每项一张小图；留空时共 2–4 个组则全部比较，超过 4 组不画 |
 | `bigwig.group` | 每组一个 bigwig（IP 样本的组，对照不合并），默认开启；`method: merge`（默认）合并组内去重后的 BAM 再 `bamCoverage`，`mean` 用 `bigwigAverage` 对各重复的 bigwig 取平均（每个重复权重相同）。只生成去掉 `merge: no` 后仍有 ≥ 2 个重复的组。<br>可以先设 `enabled: false` 只跑单个样本，看过重复一致性后标记 `merge` 列、改为 `true` 再运行，只会新增合并这一步；之后修改 `merge` 列也只重做受影响的组 |
 | `motif.enabled` | HOMER，仅对 narrow peak 的非 control 样本；`motif.params` 默认 `"-nomotif"`，只做已知 motif；改为 `""` 同时做 de novo（长度 8/10/12，慢很多） |
@@ -134,8 +134,9 @@ project/
 │   ├── 03_peaks/macs3/{sample}/         # macs3 原始输出（xls、summits 等）
 │   ├── 03_peaks/reproducible/{group}.bed  # 组内至少在 min_reps 个重复中出现的 peak（第 4 列为重复数）
 │   ├── 03_peaks/consensus.bed           # 各组 reproducible peak 的并集（DiffBind；narrow 为峰顶 ± summits bp）
-│   ├── 04_bigwig/{sample}.bw            # ★
-│   ├── 04_bigwig/groups/{group}.bw      # ★ 每组合并后的 bigwig
+│   ├── 04_bigwig/{sample}.{norm}.bw     # ★ {norm} 为归一化方式（RPGC、CPM、SFpeaks、SFbg 等）
+│   ├── 04_bigwig/groups/{group}.{norm}.bw  # ★ 每组合并后的 bigwig（size factor 方式为组内样本归一化信号的平均）
+│   ├── 04_bigwig/size_factors.{SFpeaks,SFbg}.tsv  # DESeq2 size factor（使用时）
 │   ├── 05_motif/{sample}/               # HOMER（可选）
 │   ├── 02_align/{sample}.dedup.bam      # 过滤去重后的 BAM（{sample}.raw.bam 为 bowtie2 原始比对）；stats/ 下为 flagstat、idxstats、markdup、samtools stats
 │   ├── 01_trim/reports/                 # trim_galore 报告

@@ -135,6 +135,36 @@ if BW_GROUP["method"] not in ("merge", "mean"):
 BW_GROUPS = {g: [s for s in ss if SAMPLES_DF.loc[s, "merge"] != "no"] for g, ss in GROUPS.items()}
 BW_GROUPS = {g: ss for g, ss in BW_GROUPS.items() if len(ss) >= 2}
 
+# bigwig 归一化：可多选，每种一份 {sample}.{tag}.bw；列表第一个用于流程内的 QC 图（TSS profile、meta gene）
+#   bamCoverage --normalizeUsing 的方式，tag 即其名称；DESeq2 size factor 的两种方式 tag 为 SFpeaks / SFbg
+#   （只做 IP 样本，对照不生成）
+BW_SF = {"deseq2_peaks": "SFpeaks", "deseq2_background": "SFbg"}
+BW_NORMS = config["bigwig"]["normalize"]
+BW_NORMS = [BW_NORMS] if isinstance(BW_NORMS, str) else list(BW_NORMS)
+_bad = [n for n in BW_NORMS if n not in ("RPGC", "CPM", "RPKM", "BPM", "None", *BW_SF)]
+if _bad or not BW_NORMS or len(set(BW_NORMS)) < len(BW_NORMS):
+    raise ValueError(f"bigwig.normalize={BW_NORMS} 无效：可选 RPGC / CPM / RPKM / BPM / None / "
+                     "deseq2_peaks / deseq2_background，不能为空或重复")
+if "deseq2_peaks" in BW_NORMS and not (REPLICATES["enabled"] and len(PEAK_SAMPLES) >= 2):
+    raise ValueError("bigwig.normalize 含 deseq2_peaks 时需要 replicates.enabled: true 且 ≥ 2 个 IP 样本（用 consensus peak 计数）")
+BW_TAGS = [BW_SF.get(n, n) for n in BW_NORMS]
+BW_NORM_OF = dict(zip(BW_TAGS, BW_NORMS))
+BW_TAG = BW_TAGS[0]
+
+
+def bw_samples(tag):
+    """有该归一化 bigwig 的样本：size factor 只做 IP 样本。"""
+    return PEAK_SAMPLES if tag in BW_SF.values() else SAMPLES
+
+
+def sample_bw(tag=None, samples=None):
+    tag = tag or BW_TAG
+    return expand("results/04_bigwig/{sample}.{tag}.bw", sample=samples or bw_samples(tag), tag=tag)
+
+
+def group_bw(tag=None):
+    return expand("results/04_bigwig/groups/{group}.{tag}.bw", group=BW_GROUPS, tag=tag or BW_TAG)
+
 
 def regex_of(names):
     """把样本名列表转为 wildcard 约束；空列表返回永不匹配的正则。"""
@@ -146,6 +176,8 @@ wildcard_constraints:
     group=regex_of(list(GROUPS)),
     read="R1|R2",
     ptype="narrow|broad",
+    norm=regex_of(BW_TAGS),
+    sf="SFpeaks|SFbg",
 
 
 def is_pe(sample):
@@ -180,15 +212,16 @@ def all_targets():
     for s in SAMPLES:
         t += expand("results/qc/fastqc_raw/{s}_{r}_fastqc.zip", s=s, r=reads_of(s))
         t += expand("results/qc/fastqc_trimmed/{s}_{r}.trimmed_fastqc.zip", s=s, r=reads_of(s))
-        t.append(f"results/04_bigwig/{s}.bw")
         if CONTAM["enabled"]:
             t.append(f"results/qc/contamination/{s}.log")
     for s in PEAK_SAMPLES:
         t.append(peak_file(s))
         if config["motif"]["enabled"] and SAMPLES_DF.loc[s, "peak_type"] == "narrow":
             t.append(f"results/05_motif/{s}/knownResults.txt")
-    if BW_GROUP["enabled"]:
-        t += expand("results/04_bigwig/groups/{group}.bw", group=BW_GROUPS)
+    for tag in BW_TAGS:
+        t += sample_bw(tag)
+        if BW_GROUP["enabled"]:
+            t += group_bw(tag)
     t += profile_files().values()
     if replicates_on():
         t += expand("results/03_peaks/reproducible/{group}.bed", group=REP_GROUPS)

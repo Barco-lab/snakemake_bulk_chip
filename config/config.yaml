@@ -94,10 +94,16 @@ macs3:
 
 bigwig:
   binsize: 10
-  normalize: RPGC         # RPGC | CPM | RPKM | BPM | None
+  # 归一化，可写一个或多个（列表），每种生成一份 {sample}.{方式}.bw；第一个用于 QC 图（TSS profile、meta gene）
+  #   RPGC | CPM | RPKM | BPM | None：bamCoverage --normalizeUsing
+  #   deseq2_peaks      -> {sample}.SFpeaks.bw：DESeq2 size factor（consensus peak 计数，需 replicates.enabled）
+  #   deseq2_background -> {sample}.SFbg.bw   ：DESeq2 size factor（全基因组 background_bin 大小的 bin 计数）
+  #   size factor 为 median-of-ratios（假设大多数区域在样本间不变），只做 IP 样本；值见 04_bigwig/size_factors.{SFpeaks,SFbg}.tsv
+  normalize: [RPGC]       # 如 [RPGC, CPM, deseq2_peaks]
+  background_bin: 10000   # deseq2_background 的 bin 宽（bp）
   se_fragment_length: 200  # SE 数据 --extendReads 的长度
   extra: ""
-  # 每组一个 bigwig（results/04_bigwig/groups/{group}.bw），单样本的 bigwig 照常生成
+  # 每组一个 bigwig（results/04_bigwig/groups/{group}.{方式}.bw），单样本的 bigwig 照常生成
   #   只做IP 样本的组（对照不合并）；样本表 merge 列为 no 的重复不参与，剩下 ≥ 2 个重复的组才生成
   group:
     enabled: true

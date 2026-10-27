@@ -47,7 +47,7 @@ onsuccess:
         "  results/qc/report.html              QC 报告（概览、流程与参数、QC 汇总表、重复一致性、信号 profile）\n"
         "  results/qc/summary.tsv              QC 汇总\n"
         "  results/03_peaks/                   peak（已去除 blacklist 区域）\n"
-        "  results/04_bigwig/                  bigwig（groups/ 为每组合并后的 bigwig）\n"
+        "  results/04_bigwig/                  bigwig，{sample}.{归一化方式}.bw（groups/ 为每组合并后的 bigwig）\n"
         "  results/qc/multiqc/multiqc_report.html\n"
         f"  {RUN_DIR}/        本次运行的 log、benchmarks.tsv\n"
     )
