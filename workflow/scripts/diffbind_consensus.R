@@ -43,8 +43,9 @@ obj <- dba(sampleSheet = ss, config = data.frame(
 ))
 obj$config$cores <- snakemake@threads
 
+# GRanges（1-based）-> BED（0-based 起点）；起点截到 0
 to_bed <- function(gr, path, score = NULL) {
-  d <- data.frame(seqnames(gr), start(gr) - 1L, end(gr))
+  d <- data.frame(seqnames(gr), pmax(start(gr) - 1L, 0L), end(gr))
   if (!is.null(score)) d$score <- score
   write.table(d, path, sep = "\t", quote = FALSE, row.names = FALSE, col.names = FALSE)
 }
@@ -63,6 +64,8 @@ for (g in names(groups)) {
     n <- min(min_reps, length(members))
     gr <- dba.peakset(obj, peaks = dba.mask(obj, DBA_CONDITION, g), minOverlap = n, bRetrieve = TRUE)
     gr <- granges(gr)
+    # DiffBind 读 peak 文件时把 BED 的 0-based 起点原样当作 1-based（计数时则按 1-based），这里补上 +1
+    start(gr) <- start(gr) + 1L
     # 第 4 列：区域中出现的重复数
     n_rep <- Reduce(`+`, lapply(members, function(s) overlapsAny(gr, peaks_of[[s]])))
     to_bed(gr, rep_paths[[paste0(g, ".bed")]], n_rep)
@@ -89,6 +92,8 @@ counts <- dba.peakset(obj, bRetrieve = TRUE, DataType = DBA_DATA_FRAME)
 stopifnot(ncol(counts) == 3 + length(obj$class[DBA_ID, ]))
 names(counts) <- c("Chr", "Start", "End", obj$class[DBA_ID, ])
 counts <- counts[order(match(counts$Chr, seqlevels(consensus)), counts$Start), ]
+# 峰顶 ± summits 超出 contig 起点时 DiffBind 给出负的 Start，截到 1（计数不受影响）
+counts$Start <- pmax(counts$Start, 1L)
 # 输出 consensus.bed 为计数所用的区域（summits 时为峰顶 ± summits bp）
 to_bed(GRanges(counts$Chr, IRanges(counts$Start, counts$End)), snakemake@output[["consensus"]])
 out <- data.frame(peak = sprintf("%s:%d-%d", counts$Chr, counts$Start, counts$End),
