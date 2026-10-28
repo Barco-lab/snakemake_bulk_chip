@@ -117,7 +117,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 参考文件的染色体命名：bowtie2 mm10 index、blacklist 是 UCSC 命名（`chr1`）；fasta / gtf 与 RNA 流程同源
 （`/data/genome` 下的 Ensembl release-100，命名为 `1` / `MT`），生成 TSS 和 HOMER 输入时自动互转命名。
 流程启动时会自动检查能否对应，结果写在 `results/qc/reference_check.txt`。
-blacklist 的来源和下载记录见 `~/reference/blacklist/download.log`。
+blacklist 的来源和下载记录见 `~/project/reference/blacklist/download.log`。
 
 ---
 

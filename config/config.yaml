@@ -59,7 +59,7 @@ references:
     bowtie2_index: /data/index/bowtie2/mm10/mm10
     fasta: /data/genome/Mus_musculus.GRCm38.dna.primary_assembly.fa
     gtf: /data/genome/release-100/Mus_musculus.GRCm38.100.gtf
-    blacklist: /home/LAB/lab_ab_1/reference/blacklist/mm10-blacklist.v2.bed.gz
+    blacklist: /home/LAB/lab_ab_1/project/reference/blacklist/mm10-blacklist.v2.bed.gz
     effective_genome_size: 2652783500
     chrX: chrX
     y_region: "chrY:1-90000000"                  # chrY 去掉 PAR 及其上游约 745 kb
@@ -67,7 +67,7 @@ references:
     bowtie2_index: ""        # 本机暂无，需要时自行构建（bowtie2-build）后填写
     fasta: /data/genome/Homo_sapiens.GRCh38.dna.primary_assembly.fa
     gtf: /data/genome/release-100/Homo_sapiens.GRCh38.100.gtf
-    blacklist: /home/LAB/lab_ab_1/reference/blacklist/hg38-blacklist.v2.bed.gz
+    blacklist: /home/LAB/lab_ab_1/project/reference/blacklist/hg38-blacklist.v2.bed.gz
     effective_genome_size: 2913022398
     chrX: chrX
     y_region: "chrY:2781480-56887902"            # PAR1 与 PAR2 之间（UCSC hg38）

@@ -117,7 +117,7 @@ Other settings:
 Chromosome naming of the references: the bowtie2 mm10 index and the blacklist use UCSC names (`chr1`); the fasta / gtf come from the same source as the RNA pipeline
 (Ensembl release-100 under `/data/genome`, named `1` / `MT`), and names are converted automatically when building the TSS set and the HOMER input.
 At start-up the pipeline checks that the names can be matched and writes the result to `results/qc/reference_check.txt`.
-The source and download record of the blacklist are in `~/reference/blacklist/download.log`.
+The source and download record of the blacklist are in `~/project/reference/blacklist/download.log`.
 
 ---
 
