@@ -1,9 +1,5 @@
-# 重复一致性的图（QC 报告「重复一致性」一节）。
-# 按 academic-research-skills 的 statistical_visualization_standards（APA 7.0）：
-#   sans-serif（Arial，缺失时用度量相同的 Liberation Sans），刻度 8 pt、轴标签 10 pt；去掉上、右边框
-#   分组用 Tol 色盲友好色板，颜色与点形状同时区分；宽度 6.9 in（双栏）；PNG 300 dpi + PDF + SVG
-#   图题和说明写在报告的图注中，图内不加标题
-# 相关性热图偏离规范的发散色板：样本间 r 均为正，改用 viridis 顺序色板（范围为最小 r 到 1）
+# 重复一致性的图（QC 报告「重复一致性」一节）。样式见 plot_style.R（dataviz 色板、无网格线、黑色轴线与朝外刻度）
+#   宽度 6.9 in（双栏）；PNG 300 dpi + PDF + SVG；图题和说明写在报告的图注中，图内不加标题
 log <- file(snakemake@log[[1]], open = "wt")
 sink(log, type = "message")
 sink(log, type = "output")
@@ -14,6 +10,7 @@ suppressPackageStartupMessages({
   library(patchwork)
   library(jsonlite)
 })
+source(file.path(snakemake@scriptdir, "plot_style.R"))
 
 outdir <- snakemake@params[["outdir"]]
 figures <- unlist(snakemake@params[["figures"]])
@@ -25,125 +22,56 @@ groups <- names(info$groups)
 all_groups <- union(groups, unique(per$group))  # ChIP：control 的组只出现在性别图中
 per$group <- factor(per$group, levels = all_groups)
 
-font <- if ("Arial" %in% systemfonts::system_fonts()$family) "Arial" else "Liberation Sans"
-theme_apa <- theme_minimal(base_size = 10, base_family = font) +
-  theme(
-    axis.title = element_text(size = 10),
-    axis.text = element_text(size = 8, colour = "black"),
-    legend.title = element_text(size = 9),
-    legend.text = element_text(size = 8),
-    panel.grid.minor = element_blank(),
-    axis.line = element_line(colour = "black", linewidth = 0.3),
-    axis.ticks = element_line(colour = "black", linewidth = 0.3)
-  )
-
-# 分组：颜色与形状组合，超过 8 组时错开形状，保证组合不重复
-cb_palette <- c("#0077BB", "#33BBEE", "#009988", "#EE7733", "#CC3311", "#EE3377", "#BBBBBB", "#000000")
-shapes <- c(16, 15, 17, 18, 3, 4, 8, 1)
-idx <- seq_along(all_groups) - 1
-group_col <- setNames(cb_palette[idx %% 8 + 1], all_groups)
-group_shape <- setNames(shapes[(idx + idx %/% 8) %% 8 + 1], all_groups)
+# 分组：颜色与形状同时区分（散点图中超过 3 组时颜色不足以两两区分）
+group_col <- cat_colours(all_groups)
+group_shape <- cat_shapes(all_groups)
 scale_group <- list(
   scale_colour_manual(values = group_col, name = "Group", drop = FALSE),
   scale_shape_manual(values = group_shape, name = "Group", drop = FALSE)
 )
-
-save_fig <- function(p, name, w, h) {
-  f <- file.path(outdir, name)
-  ggsave(paste0(f, ".png"), p, width = w, height = h, dpi = 300, device = ragg::agg_png, bg = "white")
-  ggsave(paste0(f, ".pdf"), p, width = w, height = h, device = cairo_pdf, bg = "white")
-  ggsave(paste0(f, ".svg"), p, width = w, height = h, device = svg, bg = "white")
-}
-
-# 样本名去掉组名前缀作为点的标签（如 Naive_rep1 -> rep1）
-short_label <- function(s, g) {
-  g <- as.character(g)
-  ifelse(startsWith(s, g) & nchar(s) > nchar(g), sub("^[._-]", "", substring(s, nchar(g) + 1)), s)
-}
+fig <- function(name) file.path(outdir, name)
 per$label <- short_label(per$sample, per$group)
 
 # ------------------------------------------------------------
-# 相关性热图：按 1 - r 层次聚类（average），上方为聚类树与分组色条
-# ------------------------------------------------------------
-if ("correlation" %in% figures) {
-  cor <- as.matrix(read.delim(snakemake@input[["correlation"]], row.names = 1, check.names = FALSE))
-  n <- nrow(cor)
-  hc <- hclust(as.dist(1 - cor), method = "average")
-  ord <- rownames(cor)[hc$order]
-
-  # 聚类树的线段：叶子的横坐标为其在 ord 中的位置
-  pos <- setNames(seq_len(n), ord)
-  node_x <- numeric(n - 1)
-  node_y <- hc$height
-  seg <- list()
-  for (i in seq_len(n - 1)) {
-    xy <- lapply(hc$merge[i, ], function(k) {
-      if (k < 0) c(pos[rownames(cor)[-k]], 0) else c(node_x[k], node_y[k])
-    })
-    node_x[i] <- mean(c(xy[[1]][1], xy[[2]][1]))
-    seg[[i]] <- data.frame(
-      x = c(xy[[1]][1], xy[[2]][1], xy[[1]][1]),
-      xend = c(xy[[1]][1], xy[[2]][1], xy[[2]][1]),
-      y = c(xy[[1]][2], xy[[2]][2], node_y[i]),
-      yend = c(node_y[i], node_y[i], node_y[i])
-    )
-  }
-  seg <- do.call(rbind, seg)
-  xs <- scale_x_continuous(limits = c(0.5, n + 0.5), expand = c(0, 0))
-  void <- theme_void(base_size = 10, base_family = font) +
-    theme(legend.title = element_text(size = 9), legend.text = element_text(size = 8))
-
-  p_tree <- ggplot(seg) +
-    geom_segment(aes(x = x, xend = xend, y = y, yend = yend), linewidth = 0.3) +
-    xs + scale_y_continuous(expand = expansion(mult = c(0, 0.05))) + void
-
-  strip <- data.frame(x = seq_len(n), group = factor(per$group[match(ord, per$sample)], levels = groups))
-  p_strip <- ggplot(strip, aes(x = x, y = 1, fill = group)) +
-    geom_tile(colour = "white", linewidth = 0.3) +
-    scale_fill_manual(values = group_col, name = "Group", drop = FALSE) +
-    xs + void
-
-  long <- data.frame(
-    x = rep(seq_len(n), each = n), y = rep(seq_len(n), times = n),
-    r = as.vector(cor[ord, ord])
-  )
-  lo <- floor(min(cor) * 100) / 100
-  method <- if (info$method == "spearman") "Spearman" else "Pearson"
-  p_heat <- ggplot(long, aes(x = x, y = y, fill = r)) +
-    geom_tile(colour = "white", linewidth = 0.2) +
-    # 色标用矩形而非位图：位图在 cairo SVG 中靠 mask / feImage 合成，Firefox 不显示
-    scale_fill_viridis_c(limits = c(lo, 1), name = paste(method, "r"), option = "viridis",
-                         guide = guide_colourbar(display = "rectangles", nbin = 50)) +
-    scale_x_continuous(breaks = seq_len(n), labels = ord, expand = c(0, 0)) +
-    scale_y_continuous(breaks = seq_len(n), labels = ord, expand = c(0, 0)) +
-    coord_cartesian(xlim = c(0.5, n + 0.5), ylim = c(0.5, n + 0.5)) +
-    labs(x = NULL, y = NULL) +
-    theme_apa +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
-      axis.line = element_blank(), axis.ticks = element_blank(), panel.grid = element_blank()
-    )
-  if (n <= 15) {  # 格子太小时 8 pt 的数字放不下
-    mid <- (lo + 1) / 2
-    p_heat <- p_heat + geom_text(aes(label = sprintf("%.2f", r), colour = r < mid), size = 8 / .pt,
-                                 family = font, show.legend = FALSE) +
-      scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "black"))
-  }
-  p <- p_tree / p_strip / p_heat + plot_layout(heights = c(0.6, 0.12, 4), guides = "collect")
-  save_fig(p, "correlation", 6.9, 6.6)
-}
-
-# ------------------------------------------------------------
-# 相关性散点矩阵：下三角为两样本在 consensus peak 上的 log2(CPM + 1)（peak 多时随机抽 info$scatter_peaks 个作图），
-#   上三角为相关系数（基于全部 consensus peak，与热图相同，底色用热图的色板），对角为样本名（按分组着色）。
-#   点用 scattermore 栅格化，文件大小与点数无关；样本按分组排列
+# 相关性散点矩阵 + 聚类树
+#   左侧为按 1 - r 层次聚类（average）的聚类树与分组色条，样本按聚类顺序排列；
+#   下三角为两样本在 consensus peak 上的 log2(CPM + 1)（peak 多时随机抽 info$scatter_peaks 个作图），
+#   上三角为相关系数（基于全部 consensus peak），对角为样本名。点用 scattermore 栅格化，文件大小与点数无关
 # ------------------------------------------------------------
 if ("correlation_scatter" %in% figures) {
   logc <- read.delim(snakemake@input[["log2cpm"]], row.names = 1, check.names = FALSE)
   cor <- as.matrix(read.delim(snakemake@input[["correlation"]], row.names = 1, check.names = FALSE))
   g_of <- setNames(as.character(per$group), per$sample)
-  ss <- colnames(logc)[order(match(g_of[colnames(logc)], groups))]
+  hc <- hclust(as.dist(1 - cor), method = "average")
+  ss <- rownames(cor)[hc$order]
   n <- length(ss)
+
+  # 聚类树：叶子 ss[k] 在第 k 行（自上而下），纵坐标 y = n - k + 1；横轴为合并高度（1 - r），根在左
+  ypos <- setNames(n - seq_len(n) + 1, ss)
+  node_y <- numeric(n - 1)
+  seg <- list()
+  for (i in seq_len(n - 1)) {
+    yh <- lapply(hc$merge[i, ], function(k) if (k < 0) c(ypos[rownames(cor)[-k]], 0) else c(node_y[k], hc$height[k]))
+    node_y[i] <- mean(c(yh[[1]][1], yh[[2]][1]))
+    h <- hc$height[i]
+    seg[[i]] <- data.frame(
+      y = c(yh[[1]][1], yh[[2]][1], yh[[1]][1]), yend = c(yh[[1]][1], yh[[2]][1], yh[[2]][1]),
+      x = c(yh[[1]][2], yh[[2]][2], h), xend = c(h, h, h)
+    )
+  }
+  seg <- do.call(rbind, seg)
+  ys <- scale_y_continuous(limits = c(0.5, n + 0.5), expand = c(0, 0))
+  void <- theme_void(base_size = 10, base_family = font) +
+    theme(legend.title = element_text(size = 9), legend.text = element_text(size = 8))
+  p_tree <- ggplot(seg) +
+    geom_segment(aes(x = x, xend = xend, y = y, yend = yend), linewidth = 0.3, colour = "black") +
+    scale_x_reverse(expand = expansion(mult = c(0.02, 0))) + ys + void
+  strip <- data.frame(y = ypos, group = factor(g_of[ss], levels = groups))
+  p_strip <- ggplot(strip, aes(x = 1, y = y, fill = group)) +
+    geom_tile(colour = "white", linewidth = 0.4) +
+    scale_fill_manual(values = group_col, name = "Group", drop = FALSE) +
+    ys + void
+
   set.seed(1)
   keep <- sample(nrow(logc), info$scatter_peaks)
   sub <- logc[keep, ss, drop = FALSE]
@@ -156,37 +84,34 @@ if ("correlation_scatter" %in% figures) {
   up <- ij[ij$i < ij$j, ]
   rt <- data.frame(row = ss[up$i], col = ss[up$j], r = cor[cbind(ss[up$i], ss[up$j])])
   lo <- floor(min(cor) * 100) / 100
-  rt$dark <- rt$r < (lo + 1) / 2  # viridis 低端颜色深，用白字
-  dg <- data.frame(row = ss, col = ss, group = factor(g_of[ss], levels = all_groups),
-                   label = sub("_(rep[0-9]+)$", "\n\\1", ss, ignore.case = TRUE))  # 末尾的 _repN 换行
+  rt$dark <- on_seq_dark(rt$r, lo, 1)
+  dg <- data.frame(row = ss, col = ss, label = sub("_(rep[0-9]+)$", "\n\\1", ss, ignore.case = TRUE))  # 末尾的 _repN 换行
   lv <- function(d) transform(d, row = factor(row, levels = ss), col = factor(col, levels = ss))
   pts <- lv(pts); rt <- lv(rt); dg <- lv(dg)
   mid <- mean(lim)
   method <- if (info$method == "spearman") "Spearman" else "Pearson"
-  p <- ggplot() +
+  p_mat <- ggplot() +
     geom_rect(data = rt, aes(fill = r), xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf) +
-    geom_text(data = rt[rt$dark, ], aes(label = sprintf("%.2f", r)), x = mid, y = mid, colour = "white",
-              size = 8 / .pt, family = font) +
-    geom_text(data = rt[!rt$dark, ], aes(label = sprintf("%.2f", r)), x = mid, y = mid, colour = "black",
-              size = 8 / .pt, family = font) +
-    geom_abline(data = unique(pts[c("row", "col")]), aes(slope = 1, intercept = 0), colour = "grey60",
+    geom_text(data = rt, aes(label = sprintf("%.2f", r), colour = dark), x = mid, y = mid, size = 8 / .pt,
+              family = font, show.legend = FALSE) +
+    scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "black")) +
+    geom_abline(data = unique(pts[c("row", "col")]), aes(slope = 1, intercept = 0), colour = REF_LINE,
                 linewidth = 0.2, linetype = "dashed") +  # 只画在下三角
-    scattermore::geom_scattermore(data = pts, aes(x, y), pointsize = 1.2, alpha = 0.15, colour = "grey15",
+    scattermore::geom_scattermore(data = pts, aes(x, y), pointsize = 1.2, alpha = 0.15, colour = "black",
                                   pixels = c(256, 256)) +
-    geom_text(data = dg, aes(label = label, colour = group), x = mid, y = mid, size = 7 / .pt, family = font,
-              lineheight = 0.9, show.legend = FALSE) +
-    scale_colour_manual(values = group_col, drop = FALSE) +
-    scale_fill_viridis_c(limits = c(lo, 1), name = paste(method, "r"),
-                         guide = guide_colourbar(display = "rectangles", nbin = 50)) +
+    geom_text(data = dg, aes(label = label), x = mid, y = mid, size = 7 / .pt, family = font, lineheight = 0.9,
+              colour = "black") +
+    scale_fill_seq(limits = c(lo, 1), name = paste(method, "r")) +
     facet_grid(row ~ col) +
     coord_cartesian(xlim = lim, ylim = lim) +
     labs(x = "log2(CPM + 1)", y = "log2(CPM + 1)") +
-    theme_apa +
+    theme_qc() +
     theme(strip.text = element_blank(), panel.spacing = unit(0.08, "lines"),
-          panel.border = element_rect(colour = "grey70", fill = NA, linewidth = 0.3),
-          axis.line = element_blank(), panel.grid = element_blank(), axis.text = element_text(size = 6))
-  w <- max(6.9, 0.55 * n + 1.2)  # 每格约 0.55 in；样本多时放大，报告中按宽度缩放
-  save_fig(p, "correlation_scatter", w, w - 0.6)
+          panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.3),
+          axis.line = element_blank(), axis.text = element_text(size = 6))
+  w <- max(6.9, 0.55 * n + 2.2)  # 每格约 0.55 in；样本多时放大，报告中按宽度缩放
+  p <- p_tree + p_strip + p_mat + plot_layout(widths = c(0.9, 0.12, 0.55 * n), guides = "collect")
+  save_fig(p, fig("correlation_scatter"), w, w - 1.6)
 }
 
 # ------------------------------------------------------------
@@ -199,12 +124,12 @@ if ("pca" %in% figures) {
   v <- info$pca_variance * 100
   p <- ggplot(pca, aes(PC1, PC2, colour = group, shape = group)) +
     geom_point(size = 2.5) +
-    geom_text_repel(aes(label = label), size = 8 / .pt, family = font, show.legend = FALSE,
-                    seed = 1, max.overlaps = Inf, min.segment.length = 0.2) +
+    geom_text_repel(aes(label = label), size = 8 / .pt, family = font, colour = "black", show.legend = FALSE,
+                    seed = 1, max.overlaps = Inf, min.segment.length = 0.2, segment.colour = REF_LINE) +
     scale_group +
     labs(x = sprintf("PC1 (%.1f%% of variance)", v[1]), y = sprintf("PC2 (%.1f%% of variance)", v[2])) +
-    theme_apa
-  save_fig(p, "pca", 6.9, 4.5)
+    theme_qc()
+  save_fig(p, fig("pca"), 6.9, 4.5)
 }
 
 # ------------------------------------------------------------
@@ -218,21 +143,21 @@ if ("peak_overlap" %in% figures) {
   set.seed(1)
   p <- ggplot(ov, aes(group, jaccard, colour = group, shape = group)) +
     geom_crossbar(data = med, aes(ymin = jaccard, ymax = jaccard), width = 0.5, linewidth = 0.3,
-                  colour = "grey30", show.legend = FALSE) +
+                  colour = "black", show.legend = FALSE) +
     geom_jitter(width = 0.12, height = 0, size = 2.2) +
     scale_group +
     scale_y_continuous(limits = c(0, 1), expand = expansion(mult = c(0, 0.02))) +
     labs(x = "Group", y = "Jaccard index of replicate peaks") +
-    theme_apa +
-    theme(legend.position = "none", panel.grid.major.x = element_blank(),
+    theme_qc() +
+    theme(legend.position = "none",
           axis.text.x = element_text(angle = 30, hjust = 1))
-  save_fig(p, "peak_overlap", 6.9, 4)
+  save_fig(p, fig("peak_overlap"), 6.9, 4)
 }
 
 # ------------------------------------------------------------
 # Venn（组内各重复 / 组间各组）：各组合独有的碱基数（bedtools multiinter），面积不按比例
 #   2、3 个集合用圆，4 个集合用椭圆（经典四椭圆布局）；每个区域用 polyclip 求出多边形，
-#   按碱基数着色（viridis），数字放在区域内离边界最远的点（四椭圆用固定位置）
+#   按碱基数着色（蓝色顺序色阶），数字放在区域内离边界最远的点（四椭圆用固定位置）
 # ------------------------------------------------------------
 if (any(c("peak_venn", "group_venn") %in% figures)) {
   ellipse <- function(x, y, w, h, angle = 0, k = 360) {
@@ -308,7 +233,7 @@ if (any(c("peak_venn", "group_venn") %in% figures)) {
     labels$mb <- labels$bp / 1e6
     hi_mb <- max(regions$mb)
     labels$text <- ifelse(labels$mb >= 10, sprintf("%.1f", labels$mb), sprintf("%.2f", labels$mb))
-    labels$dark <- labels$mb < hi_mb / 2  # viridis 低端颜色深，用白字
+    labels$dark <- on_seq_dark(labels$mb, 0, hi_mb)
 
     ncol <- min(3, length(facets))
     nrow <- ceiling(length(facets) / ncol)
@@ -319,9 +244,9 @@ if (any(c("peak_venn", "group_venn") %in% figures)) {
       geom_text(data = labels, aes(x, y, label = text, colour = dark), size = 8 / .pt, family = font, show.legend = FALSE) +
       geom_text(data = set_names, aes(x, y, label = label), size = 8 / .pt, family = font) +
       scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "black")) +
-      scale_fill_viridis_c(name = "Mb", limits = c(0, hi_mb),
-                           guide = guide_colourbar(display = "rectangles", nbin = 50, barwidth = unit(2.5, "in"),
-                                                   barheight = unit(0.12, "in"), title.vjust = 0.9)) +
+      scale_fill_seq(name = "Mb", limits = c(0, hi_mb),
+                     guide = guide_colourbar(display = "rectangles", nbin = 50, barwidth = unit(2.5, "in"),
+                                             barheight = unit(0.12, "in"), title.vjust = 0.9)) +
       facet_wrap(~group, ncol = ncol) +
       coord_fixed(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE) +
       theme_void(base_size = 10, base_family = font) +
@@ -329,7 +254,7 @@ if (any(c("peak_venn", "group_venn") %in% figures)) {
             legend.title = element_text(size = 9), legend.text = element_text(size = 8),
             panel.spacing = unit(0.4, "lines"), legend.position = "bottom")
     # 色标放在下方，横向留给各组的图；高度按每格接近正方形
-    save_fig(p, name, 6.9, 0.7 + 6.9 / ncol * 1.02 * nrow)
+    save_fig(p, fig(name), 6.9, 0.7 + 6.9 / ncol * 1.02 * nrow)
   }
 }
 
@@ -357,17 +282,18 @@ if ("sex" %in% figures) {
   floor_y <- 1e-5  # 对数轴上 0 显示为 0.00001%
   per$y_plot <- pmax(per$y_frac, floor_y)
   p <- ggplot(per, aes(x_frac, y_plot, colour = group, shape = group)) +
-    geom_hline(yintercept = th, linetype = "dashed", linewidth = 0.3, colour = "grey40") +
+    geom_hline(yintercept = th, linetype = "dashed", linewidth = 0.3, colour = REF_LINE) +
     annotate("text", x = Inf, y = th, label = c("female below", "male above"), hjust = 1.05,
-             vjust = c(1.5, -0.6), size = 8 / .pt, family = font, colour = "grey30") +
+             vjust = c(1.5, -0.6), size = 8 / .pt, family = font, colour = INK2) +
     geom_point(size = 2.5) +
     geom_text_repel(data = per[per$sex != "F", ], aes(label = sample), size = 8 / .pt, family = font,
-                    show.legend = FALSE, seed = 1, min.segment.length = 0, nudge_x = 0.3) +
+                    colour = "black", segment.colour = REF_LINE, show.legend = FALSE, seed = 1,
+                    min.segment.length = 0, nudge_x = 0.3) +
     scale_group +
     scale_y_log10(labels = function(x) paste0(format(x, scientific = FALSE, drop0trailing = TRUE, trim = TRUE), "%")) +
     scale_x_continuous(limits = c(0, max(per$x_frac, na.rm = TRUE) * 1.1),
                        labels = function(x) paste0(x, "%"), expand = expansion(mult = c(0, 0.02))) +
     labs(x = "chrX reads (% of mapped reads)", y = sprintf("chrY reads in %s (%% of mapped reads)", info$y_region)) +
-    theme_apa
-  save_fig(p, "sex", 6.9, 4.5)
+    theme_qc()
+  save_fig(p, fig("sex"), 6.9, 4.5)
 }

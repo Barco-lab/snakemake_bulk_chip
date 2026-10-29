@@ -9,7 +9,7 @@ def replicates_on():
 
 def replicate_figures():
     """报告中的图（不含扩展名）；条件不满足的图不画。"""
-    f = ["correlation", "correlation_scatter"]
+    f = ["correlation_scatter"]
     if len(PEAK_SAMPLES) >= 3:
         f.append("pca")
     if REP_GROUPS:

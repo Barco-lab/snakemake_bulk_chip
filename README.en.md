@@ -5,9 +5,9 @@
 Local pipeline for ChIP-seq (and similar data such as CUT&Tag), Snakemake ≥ 9.12.
 For ATAC-seq use `pipeline/snakemake_bulk_atac`.
 
-![workflow](docs/images/bulk_chip_workflow.svg)
+![workflow](docs/images/bulk_chip_workflow.en.svg)
 
-<sub>Solid boxes are the main workflow, dashed boxes are optional or per-sample conditional steps, green boxes are QC, and ★ marks deliverables (paths relative to `results/`). The diagram labels are in Chinese. PNG version: `docs/images/bulk_chip_workflow.png`.</sub>
+<sub>Solid boxes are the main workflow, dashed boxes are optional or per-sample conditional steps, green boxes are QC, and ★ marks deliverables (paths relative to `results/`). PNG version: `docs/images/bulk_chip_workflow.en.png`.</sub>
 
 <details>
 <summary>Text version</summary>
@@ -86,8 +86,8 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | bowtie2 | `-N 1`; plus `--no-mixed --no-discordant` for PE |
 | mitochondria | kept by default (removed with `filter.remove_mito: true`); summary reports `mito_rate (chrM) (% of mapped)` |
 | macs3 | with control: `-c control --keep-dup all`<br>without control: `--nomodel --nolambda --extsize 200 --min-length 100`<br>broad: `--broad --broad-cutoff 0.1`; `-f BAMPE` for PE |
-| QC | FRiP, fingerprint, TSS profile / enrichment, meta gene profile (TSS to TES), fragment length distribution |
-| replicates | IP samples only. Pairwise Jaccard of replicate peaks and Venn diagrams of the bases covered by each replicate combination (bedtools multiinter, groups of 2–4 replicates), and between groups using each group's reproducible peaks (`replicates.group_venn` sets the groups compared); within-group consensus sets from DiffBind (reproducible peaks present in ≥ 2 replicates), merged across groups into consensus peaks and counted with `dba.count` on IP reads (input not subtracted; summit ± 200 bp for narrow, merged widths when broad groups are present), log2(CPM + 1) for correlation (heatmap and scatter-plot matrix), clustering and PCA; sex of every sample (controls included) inferred from the fraction of mapped reads on chrX and chrY (called from the chrY region; chrX only compared within groups) |
+| QC | FRiP, fingerprint, TSS enrichment, meta gene profile (TSS to TES), genome-wide binned signal (along the chromosomes / cumulative), fragment length distribution |
+| replicates | IP samples only. Pairwise Jaccard of replicate peaks and Venn diagrams of the bases covered by each replicate combination (bedtools multiinter, groups of 2–4 replicates), and between groups using each group's reproducible peaks (`replicates.group_venn` sets the groups compared); within-group consensus sets from DiffBind (reproducible peaks present in ≥ 2 replicates), merged across groups into consensus peaks and counted with `dba.count` on IP reads (input not subtracted; summit ± 200 bp for narrow, merged widths when broad groups are present), log2(CPM + 1) for correlation (scatter-plot matrix with a dendrogram beside it), clustering and PCA; sex of every sample (controls included) inferred from the fraction of mapped reads on chrX and chrY (called from the chrY region; chrX for reference only) |
 
 Other settings:
 - filtering keeps MAPQ ≥ 30 and removes secondary, supplementary and unmapped reads; PE keeps properly paired reads with both mates passing;
@@ -110,6 +110,7 @@ Other settings:
 | `replicates.group_venn` | Groups compared in the between-group Venn diagrams: each item is 2–4 groups, e.g. `[[CBP_KA, CBP_NE, CBP_Saline], [p300_KA, p300_NE, p300_Saline]]`, one panel per item; when empty, all groups are compared if there are 2–4, otherwise none |
 | `bigwig.group` | One bigwig per group (IP groups only, controls are not merged), on by default; `method: merge` (default) merges the group's dedup BAMs and runs `bamCoverage`, `mean` averages the replicate bigwigs with `bigwigAverage` (equal weight per replicate). Only groups with ≥ 2 replicates left after `merge: no` are made.<br>You can first run with `enabled: false`, check the replicate QC, fill in the `merge` column, set `true` and run again: only the merging step is added. Changing the `merge` column later only redoes the affected groups |
 | `motif.enabled` | HOMER, only for non-control samples with narrow peaks; `motif.params` defaults to `"-nomotif"` (known motifs only); set it to `""` to add de novo motifs (lengths 8/10/12, much slower) |
+| `qc` | `metagene_profile` (protein_coding genes, TSS to TES; `metagene_matrix` holds the computeMatrix options); `genome_profile` (genome-wide binned signal, `genome_bin` default 10 kb, merged into `genome_track_bin`, default 1 Mb, along the chromosomes) |
 | `keep.raw_bam` | Default false: only the filtered, deduplicated BAM is kept |
 | `replicates` | Replicate consistency: `enabled`; `min_reps` (replicates a reproducible peak must appear in, default 2); `summits` (DiffBind counts the summit ± this many bp, default 200; not used when broad groups are present); `method` (`pearson` / `spearman`); `pca_top` (default 500); `sex_check` and `y_frac` (default `[0.002, 0.01]`: reads in the chrY region as a percentage of all mapped reads < 0.002% female, > 0.01% male) |
 | `references.<genome>.y_region` | chrY region counted for the sex check, i.e. chrY without the pseudoautosomal region (PAR, identical on X and Y): `chrY:1-90000000` for mm10 (the PAR is chrY:90745845-91644698; females also have many reads just upstream of it, so a further ~745 kb is left out), between PAR1 and PAR2 for hg38 (`chrY:2781480-56887902`). The region still contains X-homologous ampliconic sequence, so female samples carry a few reads and the call uses thresholds |
@@ -147,7 +148,8 @@ project/
 │       ├── reference_check.txt          # chromosome naming check of index, blacklist and GTF
 │       ├── replicates/                  # replicate consistency: samples.tsv, groups.tsv, peak_overlap.tsv, peak_venn.tsv, group_venn.tsv, correlation.tsv, log2cpm.tsv, pca.tsv,
 │       │                                #   peak_counts.tsv (consensus peak count matrix), diffbind.rds (DBA object for differential analysis); figures/ holds PDF, PNG (300 dpi) and SVG
-│       ├── deeptools/                   # fingerprint, tss_profile, metagene_samples / metagene_groups (meta gene profile; PNG, TSV, matrix)
+│       ├── deeptools/                   # fingerprint, tss_profile, metagene_samples / metagene_groups (meta gene profile; TSV, matrix), genome_bins.tsv (genome-wide binned signal)
+│       ├── figures/                     # fragment length, meta gene and genome-wide bin figures of the report (PDF, PNG 300 dpi, SVG)
 │       └── fastqc_*/  frip/  contamination/
 └── logs/
     └── run_<time>/                    # one per snakemake run; a resumed run only contains the jobs it actually ran
@@ -170,12 +172,14 @@ project/
 | `clean_rate (% of raw)` | clean_reads / raw_reads | |
 | `mapping_rate (% of clean)` | mapped_reads / clean_reads | compare within the batch |
 | `dedup_rate (% of filtered)` | dedup_reads / filtered_reads | |
-| `duplicates_rate (% of filtered)` | (filtered_reads − dedup_reads) / filtered_reads | compare within the batch; usually higher for CUT&Tag |
+| `duplicates_rate (% of filtered)` | (filtered_reads − dedup_reads) / filtered_reads | flagged above 50%; usually higher for CUT&Tag |
 | `mito_rate (chrM) (% of mapped)` | mitochondrial reads / mapped_reads (`filter.mito_name`) | compare within the batch |
 | `peaks` / `frip` | number of peaks and FRiP (reads in peaks / dedup_reads) | FRiP ≥ 1% for TF ChIP (ENCODE guidelines) |
 | `tss_enrichment (±3000bp)` | TSS centre signal / flank background (estimated from the deeptools profile; window set by `qc.tss_matrix`) |  |
 | `contamination_rate (% of clean)` | fraction of clean reads aligning to the contaminant genome (only with `contamination.enabled`) | |
 | `subnucleosomal_rate (% of fragments < 120bp)` | share of deduplicated PE fragments shorter than 120 bp (sub-nucleosomal; samtools stats; empty for SE). In CUT&Tag a high share close to the IgG control points to an open-chromatin (Tn5) bias; distribution in `qc/figures/fragment_length.*` | |
+
+Colour flags in the report: metrics with a fixed threshold (e.g. FRiP, dedup reads, duplicate rate > 50%, the chrY thresholds for sex) are flagged only by that threshold; metrics without one (e.g. chrM fraction, peak numbers, within-group correlation) are compared within the batch and flagged in orange when more than 3 × MAD from the median.
 
 ---
 

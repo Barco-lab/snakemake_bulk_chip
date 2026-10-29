@@ -14,7 +14,7 @@ ATAC-seq 请用 `pipeline/snakemake_bulk_atac`。
 
 ```
 fastq ─► trim_galore ─► bowtie2 ─► 过滤（MAPQ≥30、properly paired、chrM）─► 去重 ─► macs3 ─► 去除 blacklist ─► FRiP
-             └─ FastQC (raw / trimmed)                                       ├─► bigwig ─► TSS profile / enrichment
+             └─ FastQC (raw / trimmed)                                       ├─► bigwig ─► TSS enrichment、meta gene、全基因组 bin profile
                                                                              ├─► fingerprint、samtools stats（片段长度）
                                                                              └─► HOMER motif（可选）
                                      可选：污染检查（比对到其它物种）
@@ -86,8 +86,8 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | bowtie2 | `-N 1`；PE 加 `--no-mixed --no-discordant` |
 | 线粒体 | 默认保留（`filter.remove_mito: true` 时去除），summary 中报告 `mito_rate (chrM) (% of mapped)` |
 | macs3 | 有对照：`-c control --keep-dup all`<br>无对照：`--nomodel --nolambda --extsize 200 --min-length 100`<br>broad：`--broad --broad-cutoff 0.1`；PE 用 `-f BAMPE` |
-| QC | FRiP、fingerprint、TSS profile / enrichment、meta gene profile（TSS 到 TES）、片段长度分布 |
-| 重复一致性 | 只比较 IP 样本。组内重复两两 peak 的 Jaccard，及各重复组合独有碱基数的 Venn 图（bedtools multiinter，2–4 个重复的组）；组间同样用各组 reproducible peak 画 Venn 图（`replicates.group_venn` 指定比较哪些组）；用 DiffBind 求各组组内 consensus（在 ≥ 2 个重复中出现的 reproducible peak），各组取并集为 consensus peak，`dba.count` 计数 IP（不扣除 input；narrow 取峰顶 ± 200 bp，有 broad 的组时保留原宽度）后以 log2(CPM + 1) 计算相关性（热图与散点矩阵）、层次聚类和 PCA；按 chrX、chrY reads 占全部比对 reads 的比例推断所有样本（含对照）的性别（以 chrY 计数区判定，chrX 只在组内比较） |
+| QC | FRiP、fingerprint、TSS enrichment、meta gene profile（TSS 到 TES）、全基因组 bin 信号（沿染色体 / 累积分布）、片段长度分布 |
+| 重复一致性 | 只比较 IP 样本。组内重复两两 peak 的 Jaccard，及各重复组合独有碱基数的 Venn 图（bedtools multiinter，2–4 个重复的组）；组间同样用各组 reproducible peak 画 Venn 图（`replicates.group_venn` 指定比较哪些组）；用 DiffBind 求各组组内 consensus（在 ≥ 2 个重复中出现的 reproducible peak），各组取并集为 consensus peak，`dba.count` 计数 IP（不扣除 input；narrow 取峰顶 ± 200 bp，有 broad 的组时保留原宽度）后以 log2(CPM + 1) 计算相关性（散点矩阵，旁边为聚类树）、层次聚类和 PCA；按 chrX、chrY reads 占全部比对 reads 的比例推断所有样本（含对照）的性别（以 chrY 计数区判定，chrX 只作参考） |
 
 其它设置：
 - 过滤条件为 MAPQ ≥ 30，并去掉 secondary、supplementary、unmapped reads；PE 只保留两端都合格的 properly paired；
@@ -110,6 +110,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | `replicates.group_venn` | 组间 Venn 图比较哪些组：每项为 2–4 个组，如 `[[CBP_KA, CBP_NE, CBP_Saline], [p300_KA, p300_NE, p300_Saline]]`，每项一张小图；留空时共 2–4 个组则全部比较，超过 4 组不画 |
 | `bigwig.group` | 每组一个 bigwig（IP 样本的组，对照不合并），默认开启；`method: merge`（默认）合并组内去重后的 BAM 再 `bamCoverage`，`mean` 用 `bigwigAverage` 对各重复的 bigwig 取平均（每个重复权重相同）。只生成去掉 `merge: no` 后仍有 ≥ 2 个重复的组。<br>可以先设 `enabled: false` 只跑单个样本，看过重复一致性后标记 `merge` 列、改为 `true` 再运行，只会新增合并这一步；之后修改 `merge` 列也只重做受影响的组 |
 | `motif.enabled` | HOMER，仅对 narrow peak 的非 control 样本；`motif.params` 默认 `"-nomotif"`，只做已知 motif；改为 `""` 同时做 de novo（长度 8/10/12，慢很多） |
+| `qc` | `metagene_profile`（protein_coding 基因 TSS 到 TES，`metagene_matrix` 为 computeMatrix 参数）；`genome_profile`（全基因组 bin 信号，`genome_bin` 默认 10 kb，沿染色体的图合并为 `genome_track_bin`，默认 1 Mb） |
 | `keep.raw_bam` | 默认 false：只保留过滤去重后的 BAM |
 | `replicates` | 重复一致性：`enabled`；`min_reps`（reproducible peak 至少出现的重复数，默认 2）；`summits`（DiffBind 计数时取峰顶 ± 多少 bp，默认 200；有 broad 的组时自动不用）；`method`（`pearson` / `spearman`）；`pca_top`（默认 500）；`sex_check` 与 `y_frac`（默认 `[0.002, 0.01]`：chrY 计数区 reads 占全部比对 reads < 0.002% 判为雌性、> 0.01% 判为雄性） |
 | `references.<genome>.y_region` | 性别检查统计的 chrY 区域，即 chrY 去掉 PAR（拟常染色体区，X、Y 上序列相同）：mm10 为 `chrY:1-90000000`（PAR 为 chrY:90745845-91644698，PAR 起点上游雌性也有大量 reads，故多留约 745 kb），hg38 为 PAR1 与 PAR2 之间（`chrY:2781480-56887902`）。该区域仍含与 chrX 同源的扩增序列，雌性样本也有少量 reads，因此按阈值判定 |
@@ -147,7 +148,8 @@ project/
 │       ├── reference_check.txt          # index、blacklist、GTF 染色体命名检查
 │       ├── replicates/                  # 重复一致性：samples.tsv、groups.tsv、peak_overlap.tsv、peak_venn.tsv、group_venn.tsv、correlation.tsv、log2cpm.tsv、pca.tsv、
 │       │                                #   peak_counts.tsv（consensus peak 计数矩阵）、diffbind.rds（DBA 对象，可接着做差异分析）；figures/ 下为 PDF、PNG（300 dpi）、SVG
-│       ├── deeptools/                   # fingerprint、tss_profile、metagene_samples / metagene_groups（meta gene profile；PNG、TSV、matrix）
+│       ├── deeptools/                   # fingerprint、tss_profile、metagene_samples / metagene_groups（meta gene profile；TSV、matrix）、genome_bins.tsv（全基因组 bin 信号）
+│       ├── figures/                     # 报告中的片段长度、meta gene、全基因组 bin 图（PDF、PNG 300 dpi、SVG）
 │       └── fastqc_*/  frip/  contamination/
 └── logs/
     └── run_<时间>/                    # 每执行一次 snakemake 新建一个；续跑时只含这次实际跑了的任务
@@ -170,12 +172,14 @@ project/
 | `clean_rate (% of raw)` | clean_reads / raw_reads | |
 | `mapping_rate (% of clean)` | mapped_reads / clean_reads | 与同批比较 |
 | `dedup_rate (% of filtered)` | dedup_reads / filtered_reads | |
-| `duplicates_rate (% of filtered)` | (filtered_reads − dedup_reads) / filtered_reads | 与同批比较；CUT&Tag 通常较高 |
+| `duplicates_rate (% of filtered)` | (filtered_reads − dedup_reads) / filtered_reads | > 50% 时提示；CUT&Tag 通常较高 |
 | `mito_rate (chrM) (% of mapped)` | 线粒体 reads / mapped_reads（`filter.mito_name`） | 与同批比较 |
 | `peaks` / `frip` | peak 数与 FRiP（peak 内 reads / dedup_reads） | TF ChIP 的 FRiP ≥ 1%（ENCODE 指南） |
 | `tss_enrichment (±3000bp)` | TSS 中心信号 / 两端背景（按 deeptools profile 估算，窗口由 `qc.tss_matrix` 决定） |  |
 | `contamination_rate (% of clean)` | clean reads 比对到污染物种的比例（仅 `contamination.enabled` 时输出） | |
 | `subnucleosomal_rate (% of fragments < 120bp)` | 去重后 PE 片段中 < 120 bp（亚核小体）的比例（samtools stats；SE 为空）。CUT&Tag 中偏高、接近 IgG 提示开放染色质（Tn5）偏好；分布图见 `qc/figures/fragment_length.*` | |
+
+报告中的标色：有固定阈值的指标（如 FRiP、dedup reads、重复率 > 50%、性别的 chrY 阈值）只按阈值标色；没有固定阈值的指标（如 chrM 比例、peak 数、组内相关性）与同批样本比较，偏离中位数超过 3 × MAD 时标为橙色。
 
 ---
 

@@ -1,5 +1,6 @@
-# bigwig 与 deeptools QC：fingerprint（ChIP）、TSS profile / TSS enrichment、meta gene profile
+# bigwig 与 deeptools QC：fingerprint（ChIP）、TSS enrichment、meta gene profile、全基因组 bin 信号
 # bigwig 每种归一化一份（bigwig.normalize，见 common.smk 的 BW_TAGS）；DESeq2 size factor 的两种方式先算 size factor
+# 报告中的 profile 图由 profile_plots.R 根据 deeptools 输出的数据表绘制
 
 
 def extend_args(samples):
@@ -300,3 +301,93 @@ rule metagene_profile:
         plotProfile -m {output.matrix} -o {output.png} --outFileNameData {output.data} \
             {params.plot} >> {log} 2>&1
         """
+
+
+rule genome_bins:
+    """全基因组 bin（qc.genome_bin）上各样本 bigwig 的平均信号（multiBigwigSummary，排除 blacklist），用于全基因组的两张 profile 图。"""
+    input:
+        bw=sample_bw(),
+    output:
+        tsv="results/qc/deeptools/genome_bins.tsv",
+        npz=temp("results/qc/deeptools/genome_bins.npz"),
+    params:
+        labels=bw_samples(BW_TAG),
+        args=f"--binSize {config['qc']['genome_bin']}"
+        + (f" --blackListFileName {REF['blacklist']}" if REF.get("blacklist") else ""),
+    threads: threads_for("deeptools")
+    log:
+        "<logs>/deeptools/genome_bins.log",
+    benchmark:
+        "<benchmarks>/deeptools/genome_bins.tsv"
+    conda:
+        ENV_MACS
+    shell:
+        """
+        multiBigwigSummary bins -b {input.bw} --labels {params.labels} {params.args} -p {threads} \
+            -o {output.npz} --outRawCounts {output.tsv} > {log} 2>&1
+        """
+
+
+def mx_opt(cmd, names, default):
+    """computeMatrix 命令中某个参数的值（未写时用 deeptools 默认值）。"""
+    m = re.search(r"(?:^|\s)(?:" + "|".join(names) + r")[\s=]+(\d+)", cmd)
+    return int(m.group(1)) if m else default
+
+
+def matrix_layout(cmd):
+    """computeMatrix scale-regions 的区域划分（bp），profile_plots.R 据此画横轴。"""
+    return dict(
+        upstream=mx_opt(cmd, ["-b", "--upstream", "--beforeRegionStartLength"], 0),
+        downstream=mx_opt(cmd, ["-a", "--downstream", "--afterRegionStartLength"], 0),
+        body=mx_opt(cmd, ["-m", "--regionBodyLength"], 1000),
+        unscaled5=mx_opt(cmd, ["--unscaled5prime"], 0),
+        unscaled3=mx_opt(cmd, ["--unscaled3prime"], 0),
+        binsize=mx_opt(cmd, ["-bs", "--binSize"], 10),
+    )
+
+
+def profile_figures():
+    """报告「信号 profile」一节的图（不含扩展名）。"""
+    f = []
+    if config["qc"]["metagene_profile"]:
+        f.append("metagene_samples")
+        if BW_GROUP["enabled"] and BW_GROUPS:
+            f.append("metagene_groups")
+    if config["qc"]["genome_profile"]:
+        f += ["genome_track", "genome_distribution"]
+    return f
+
+
+def profile_plot_inputs():
+    figs, d = profile_figures(), {}
+    if "metagene_samples" in figs:
+        d["metagene_samples"] = "results/qc/deeptools/metagene_samples.tsv"
+    if "metagene_groups" in figs:
+        d["metagene_groups"] = "results/qc/deeptools/metagene_groups.tsv"
+    if "genome_track" in figs:
+        d["bins"] = "results/qc/deeptools/genome_bins.tsv"
+    return d
+
+
+if profile_figures():
+
+    rule profile_plots:
+        """信号 profile 的图（R，ggplot2）：PNG 300 dpi、PDF、SVG（嵌入 QC 报告）。"""
+        input:
+            unpack(lambda wc: profile_plot_inputs()),
+        output:
+            expand("results/qc/figures/{fig}.{ext}", fig=profile_figures(), ext=["png", "pdf", "svg"]),
+        params:
+            figures=profile_figures(),
+            outdir="results/qc/figures",
+            groups={s: SAMPLES_DF.loc[s, "group"] for s in SAMPLES},
+            controls=sorted(CONTROLS),
+            norm=BW_TAG,
+            layout=matrix_layout(config["qc"]["metagene_matrix"]),
+            track_bin=config["qc"]["genome_track_bin"],
+        log:
+            "<logs>/profile_plots.log",
+        conda:
+            ENV_MAIN
+        script:
+            "../scripts/profile_plots.R"

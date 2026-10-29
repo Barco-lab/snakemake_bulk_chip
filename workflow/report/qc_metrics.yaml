@@ -6,9 +6,10 @@
 #   ref           参考值
 #   sources       出处，对应下方 sources 的键
 #   digits        显示的小数位数（默认 2）
-#   outlier       true 时与本批样本比较：|值 - 中位数| > 3 x MAD（MAD x 1.4826 换算为标准差尺度）标为橙色
+#   outlier       true 时与本批样本比较：|值 - 中位数| > 3 x MAD（MAD x 1.4826 换算为标准差尺度）标为橙色；
+#                 只用于没有固定阈值的指标
 #   outlier_when  只在满足条件的样本之间比较（如只比较 IP 样本）
-#   checks        有公开阈值的检查。when 限定样本（按 summary.tsv 的列取值），expr 为 Python 表达式，
+#   checks        有固定阈值的检查（有阈值的指标不再按离群提醒）。when 限定样本（按 summary.tsv 的列取值），expr 为 Python 表达式，
 #                 可直接使用各列名（不含括号部分）；level 为 warn（橙）或 fail（红）
 # rate 以进入该步骤的 reads 为分母（%，见 summary.tsv 表头括号），与各软件报告和 ENCODE 标准口径一致。
 # ENCODE 的测序深度以 usable fragments 计：PE 为 dedup_reads / 2，SE 为 dedup_reads。
@@ -75,11 +76,13 @@ metrics:
       zh: (filtered_reads − dedup_reads) / filtered_reads，samtools markdup 判定的 PCR 重复比例
       en: (filtered_reads − dedup_reads) / filtered_reads, PCR duplicates flagged by samtools markdup
     ref:
-      zh: 无直接阈值；ENCODE 以 NRF > 0.9、PBC1 > 0.9、PBC2 > 10 衡量文库复杂度（本流程未计算）。CUT&Tag 起始量低，重复率通常较高
-      en: No direct cutoff; ENCODE uses NRF > 0.9, PBC1 > 0.9, PBC2 > 10 (not computed here). CUT&Tag usually has higher duplication
+      zh: 超过 50% 时提示（文库复杂度低，有效深度明显少于测序量）。ENCODE 以 NRF > 0.9、PBC1 > 0.9、PBC2 > 10 衡量文库复杂度（本流程未计算）。CUT&Tag 起始量低，重复率通常较高
+      en: Flagged above 50% (low library complexity, effective depth well below the sequenced reads). ENCODE uses NRF > 0.9, PBC1 > 0.9, PBC2 > 10 (not computed here). CUT&Tag usually has higher duplication
     sources: [ENCODE-TF]
-    outlier: true
-    outlier_when: {role: chip}
+    checks:
+      - expr: duplicates_rate > 50
+        level: warn
+        message: {zh: 重复率超过 50%, en: duplicate rate above 50%}
   peaks:
     desc: {zh: MACS3 call 出的 peak 数（去除 blacklist 区域后；对照样本为空）, en: MACS3 peaks after removing blacklist regions (empty for controls)}
     ref: {zh: 随靶标差别很大，与同批同靶标样本比较, en: Depends strongly on the target; compare samples of the same target}
@@ -91,7 +94,6 @@ metrics:
       en: No threshold in the current ENCODE standards; the ENCODE guidelines (Landt 2012) use FRiP ≥ 1% for TF ChIP-seq. Histone marks and CUT&Tag are usually much higher
     sources: [ENCODE-TF, Landt2012]
     digits: 4
-    outlier: true
     checks:
       - when: {role: chip}
         expr: frip < 0.01
@@ -180,8 +182,8 @@ replicates:
   x_frac:
     desc: {zh: chrX 的 reads 占全部比对 reads 的百分比, en: Reads on chrX as a percentage of all mapped reads}
     ref:
-      zh: IP 样本随抗体、细胞类型变化，不用于判定；input 为全基因组 DNA，反映 X 拷贝数。明显低于同组中位数（> 3 × MAD）时提示
-      en: Varies with antibody and cell type in IP samples, so not used for the call; in input DNA it reflects X copy number. Flagged when well below the group median (> 3 × MAD)
+      zh: IP 样本随抗体、细胞类型变化，不用于判定，也不提示；input 为全基因组 DNA，反映 X 拷贝数
+      en: Varies with antibody and cell type in IP samples, so it is neither used for the call nor flagged; in input DNA it reflects X copy number
     digits: 2
   sex:
     desc: {zh: 推断的性别：F / M / undetermined, en: "Inferred sex: F / M / undetermined"}

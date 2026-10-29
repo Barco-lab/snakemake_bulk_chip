@@ -13,16 +13,10 @@ def qc_files():
 
 
 def profile_files():
-    """QC 报告「信号 profile」一节：deeptools plotProfile 的 PNG 及基因数（bed），由 config 控制。"""
-    d = {}
-    if config["qc"]["tss_profile"]:
-        d["prof_tss"] = "results/qc/deeptools/tss_profile.png"
-        d["prof_tss_bed"] = "results/reference/tss.bed"
+    """QC 报告「信号 profile」一节：profile_plots 的 SVG；meta gene 另需基因数（bed）。"""
+    d = {f"prof_{f}": f"results/qc/figures/{f}.svg" for f in profile_figures()}
     if config["qc"]["metagene_profile"]:
-        d["prof_samples"] = "results/qc/deeptools/metagene_samples.png"
         d["prof_genes"] = "results/reference/genes.bed"
-        if BW_GROUP["enabled"] and BW_GROUPS:
-            d["prof_groups"] = "results/qc/deeptools/metagene_groups.png"
     return d
 
 
@@ -221,6 +215,9 @@ def report_settings():
         ("Meta gene profile", "Meta gene profile",
          f"`{c['qc']['metagene_matrix']}`；protein_coding 基因，长度 ≥ {c['qc']['metagene_min_length']} bp" if c["qc"]["metagene_profile"] else "不计算",
          f"`{c['qc']['metagene_matrix']}`; protein_coding genes ≥ {c['qc']['metagene_min_length']} bp" if c["qc"]["metagene_profile"] else "disabled"),
+        ("全基因组 bin", "Genome-wide bins",
+         f"`multiBigwigSummary bins --binSize {c['qc']['genome_bin']}`，排除 blacklist；沿染色体的图合并为 {c['qc']['genome_track_bin']:,} bp" if c["qc"]["genome_profile"] else "不计算",
+         f"`multiBigwigSummary bins --binSize {c['qc']['genome_bin']}`, blacklist excluded; merged into {c['qc']['genome_track_bin']:,} bp along the chromosomes" if c["qc"]["genome_profile"] else "disabled"),
         ("污染检查", "Contamination", f"比对到 {CONTAM['genome']}" if CONTAM["enabled"] else "不检查",
          f"aligned to {CONTAM['genome']}" if CONTAM["enabled"] else "disabled"),
         ("motif", "motif", "HOMER（narrow、非对照样本）" if c["motif"]["enabled"] else "不分析",
@@ -258,23 +255,27 @@ rule qc_report:
         multiqc="results/qc/multiqc/multiqc_report.html",
         metrics=workflow.source_path("../report/qc_metrics.yaml"),
         flowchart=workflow.source_path("../../docs/images/bulk_chip_workflow.svg"),
+        flowchart_en=workflow.source_path("../../docs/images/bulk_chip_workflow.en.svg"),
     output:
         "results/qc/report.html",
     params:
         title=("ChIP-seq / CUT&Tag QC 报告", "ChIP-seq / CUT&Tag QC report"),
         pipeline="snakemake_bulk_chip",
+        github="https://github.com/Barco-lab/snakemake_bulk_chip",
         version=pipeline_version(Path(workflow.basedir).parent),
         settings=report_settings(),
         qvalue=config["macs3"]["qvalue"],
         multiqc="multiqc/multiqc_report.html",  # 相对 report.html 的路径
         rep_figures=replicate_figures() if replicates_on() else [],
         profile=dict(
-            tss=config["qc"]["tss_matrix"],
+            figures=profile_figures(),
             metagene=config["qc"]["metagene_matrix"],
             min_len=config["qc"]["metagene_min_length"],
             norm=BW_TAG,
             controls=BW_TAG not in BW_SF.values(),
             group_method=BW_GROUP["method"],
+            genome_bin=config["qc"]["genome_bin"],
+            track_bin=config["qc"]["genome_track_bin"],
         ),
     log:
         "<logs>/qc_report.log",

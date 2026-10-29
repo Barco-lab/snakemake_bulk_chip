@@ -4,7 +4,7 @@
               组内各重复组合独有的碱基数（bedtools multiinter，供 Venn 图）；组间同理，用各组的 reproducible peak
   相关性 / PCA consensus peak 计数（DiffBind，见 diffbind_consensus.R）-> log2(CPM + 1)（CPM 以 consensus peak 内的总计数为分母）
   性别        chrX、chrY 计数区（y_region，chrY 去掉 PAR）的 reads 占全部比对 reads 的百分比；按 chrY 占比判定
-只比较 IP 样本；被用作 control 的样本只做性别检查（samples.tsv 中 role 为 control，重复一致性各列为空）。
+ChIP 流程只比较 IP 样本，被用作 control 的样本只做性别检查（samples.tsv 中 role 为 control，重复一致性各列为空）；ATAC 没有对照，role 均为 IP。
 结果写成 tsv / json，供 replicate_plots.R 绘图和 qc_report.py 使用。
 """
 import itertools
