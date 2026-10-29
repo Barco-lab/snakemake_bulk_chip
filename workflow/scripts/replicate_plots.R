@@ -237,6 +237,7 @@ if (any(c("peak_venn", "group_venn") %in% figures)) {
 
     ncol <- min(3, length(facets))
     nrow <- ceiling(length(facets) / ncol)
+    w <- min(6.9, 2.3 * ncol + 0.3)  # 每格约 2.3 in；小图少时整体变窄
     p <- ggplot() +
       geom_polygon(data = regions, aes(x, y, group = part, fill = mb)) +
       geom_polygon(data = outlines, aes(x, y, group = interaction(group, id)), fill = NA, colour = "black",
@@ -245,7 +246,7 @@ if (any(c("peak_venn", "group_venn") %in% figures)) {
       geom_text(data = set_names, aes(x, y, label = label), size = 8 / .pt, family = font) +
       scale_colour_manual(values = c(`TRUE` = "white", `FALSE` = "black")) +
       scale_fill_seq(name = "Mb", limits = c(0, hi_mb),
-                     guide = guide_colourbar(display = "rectangles", nbin = 50, barwidth = unit(2.5, "in"),
+                     guide = guide_colourbar(display = "rectangles", nbin = 50, barwidth = unit(min(2.5, w - 0.8), "in"),
                                              barheight = unit(0.12, "in"), title.vjust = 0.9)) +
       facet_wrap(~group, ncol = ncol) +
       coord_fixed(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE) +
@@ -254,7 +255,7 @@ if (any(c("peak_venn", "group_venn") %in% figures)) {
             legend.title = element_text(size = 9), legend.text = element_text(size = 8),
             panel.spacing = unit(0.4, "lines"), legend.position = "bottom")
     # 色标放在下方，横向留给各组的图；高度按每格接近正方形
-    save_fig(p, fig(name), 6.9, 0.7 + 6.9 / ncol * 1.02 * nrow)
+    save_fig(p, fig(name), w, 0.7 + (w - 0.3) / ncol * 1.02 * nrow)
   }
 }
 

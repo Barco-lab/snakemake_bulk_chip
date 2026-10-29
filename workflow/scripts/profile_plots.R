@@ -3,7 +3,7 @@
 #   metagene_groups     组 bigwig 的 meta gene profile，每格最多 3 组
 #   genome_track        全基因组 bin 信号沿染色体分布：每个样本 log2(bin 平均信号 / 该样本全部 bin 的中位数)，
 #                       multiBigwigSummary 的小 bin 先合并为 track_bin 再作图（信号为 0 的 bin，如组装缺口，不画）；每组一个分面
-#   genome_distribution 全基因组 bin 信号的累积分布：bin 按信号从低到高排列，纵轴为累计信号占比（同 deeptools fingerprint）
+#   genome_distribution 全基因组 bin 信号的分布：信号 > 0 的 bin 的 log2(信号) 的密度曲线
 # 只用主要染色体（1–22 / 1–19、X、Y，命名带不带 chr 均可）
 log <- file(snakemake@log[[1]], open = "wt")
 sink(log, type = "message")
@@ -169,26 +169,26 @@ if ("genome_track" %in% figures) {
 }
 
 if ("genome_distribution" %in% figures) {
-  # 每个样本：bin 按信号升序，横轴为 bin 的累计比例，纵轴为信号的累计比例；取 500 个分位点作图
-  q <- seq(0, 1, length.out = 501)
-  cum <- rbindlist(lapply(ss, function(s) {
-    v <- sort(bins[[s]][!is.na(bins[[s]])])
-    cs <- c(0, cumsum(v)) / sum(v)
-    k <- round(q * length(v)) + 1
-    data.table(sample = s, rank = q, cum = cs[k])
+  # 每个样本：信号 > 0 的 bin 的 log2(信号) 的密度（density，默认带宽），共用横轴范围（全部样本的 0.1%–99.9% 分位）
+  lv <- lapply(ss, function(s) {
+    v <- bins[[s]]
+    log2(v[!is.na(v) & v > 0])
+  })
+  xr <- quantile(unlist(lv), c(0.001, 0.999))
+  dens <- rbindlist(lapply(seq_along(ss), function(k) {
+    d <- density(lv[[k]], from = xr[1], to = xr[2], n = 512)
+    data.table(sample = ss[k], x = d$x, y = d$y)
   }))
-  r <- add_replicates(as.data.frame(cum))
+  r <- add_replicates(as.data.frame(dens))
   ng <- nlevels(r$d$group)
   ncol <- min(3, ng)
-  p <- ggplot(r$d, aes(rank, cum, group = sample, colour = rep, linetype = role)) +
-    geom_abline(slope = 1, intercept = 0, colour = REF_LINE, linewidth = 0.3, linetype = "dashed") +
+  p <- ggplot(r$d, aes(x, y, group = sample, colour = rep, linetype = role)) +
     geom_line(linewidth = 0.45) +
     facet_wrap(~group, ncol = ncol) +
     r$scales +
-    scale_x_continuous(limits = c(0, 1), breaks = c(0, 0.5, 1), expand = c(0, 0), labels = function(x) paste0(x * 100, "%")) +
-    scale_y_continuous(limits = c(0, 1), expand = c(0, 0), labels = function(x) paste0(x * 100, "%")) +
-    coord_fixed() +
-    labs(x = "Genome bins, ranked by signal", y = "Cumulative share of signal") +
+    scale_x_continuous(expand = c(0, 0)) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.05)), limits = c(0, NA)) +
+    labs(x = sprintf("log2(bin signal, %s)", norm), y = "Density") +
     theme_qc() + top_legend
-  save_fig(p, fig("genome_distribution"), 6.9, 0.9 + 6.9 / ncol * 0.95 * ceiling(ng / ncol))
+  save_fig(p, fig("genome_distribution"), if (ncol == 1) 3.6 else 6.9, 0.9 + 2.1 * ceiling(ng / ncol))
 }

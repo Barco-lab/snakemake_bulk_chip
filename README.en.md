@@ -86,7 +86,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | bowtie2 | `-N 1`; plus `--no-mixed --no-discordant` for PE |
 | mitochondria | kept by default (removed with `filter.remove_mito: true`); summary reports `mito_rate (chrM) (% of mapped)` |
 | macs3 | with control: `-c control --keep-dup all`<br>without control: `--nomodel --nolambda --extsize 200 --min-length 100`<br>broad: `--broad --broad-cutoff 0.1`; `-f BAMPE` for PE |
-| QC | FRiP, fingerprint, TSS enrichment, meta gene profile (TSS to TES), genome-wide binned signal (along the chromosomes / cumulative), fragment length distribution |
+| QC | FRiP, fingerprint, TSS enrichment, meta gene profile (TSS to TES), genome-wide binned signal (along the chromosomes / density), fragment length distribution |
 | replicates | IP samples only. Pairwise Jaccard of replicate peaks and Venn diagrams of the bases covered by each replicate combination (bedtools multiinter, groups of 2–4 replicates), and between groups using each group's reproducible peaks (`replicates.group_venn` sets the groups compared); within-group consensus sets from DiffBind (reproducible peaks present in ≥ 2 replicates), merged across groups into consensus peaks and counted with `dba.count` on IP reads (input not subtracted; summit ± 200 bp for narrow, merged widths when broad groups are present), log2(CPM + 1) for correlation (scatter-plot matrix with a dendrogram beside it), clustering and PCA; sex of every sample (controls included) inferred from the fraction of mapped reads on chrX and chrY (called from the chrY region; chrX for reference only) |
 
 Other settings:

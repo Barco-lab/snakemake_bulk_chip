@@ -86,7 +86,7 @@ input_rep2    /data/input_rep2_1.fq.gz /data/input_rep2_2.fq.gz input
 | bowtie2 | `-N 1`；PE 加 `--no-mixed --no-discordant` |
 | 线粒体 | 默认保留（`filter.remove_mito: true` 时去除），summary 中报告 `mito_rate (chrM) (% of mapped)` |
 | macs3 | 有对照：`-c control --keep-dup all`<br>无对照：`--nomodel --nolambda --extsize 200 --min-length 100`<br>broad：`--broad --broad-cutoff 0.1`；PE 用 `-f BAMPE` |
-| QC | FRiP、fingerprint、TSS enrichment、meta gene profile（TSS 到 TES）、全基因组 bin 信号（沿染色体 / 累积分布）、片段长度分布 |
+| QC | FRiP、fingerprint、TSS enrichment、meta gene profile（TSS 到 TES）、全基因组 bin 信号（沿染色体 / 密度分布）、片段长度分布 |
 | 重复一致性 | 只比较 IP 样本。组内重复两两 peak 的 Jaccard，及各重复组合独有碱基数的 Venn 图（bedtools multiinter，2–4 个重复的组）；组间同样用各组 reproducible peak 画 Venn 图（`replicates.group_venn` 指定比较哪些组）；用 DiffBind 求各组组内 consensus（在 ≥ 2 个重复中出现的 reproducible peak），各组取并集为 consensus peak，`dba.count` 计数 IP（不扣除 input；narrow 取峰顶 ± 200 bp，有 broad 的组时保留原宽度）后以 log2(CPM + 1) 计算相关性（散点矩阵，旁边为聚类树）、层次聚类和 PCA；按 chrX、chrY reads 占全部比对 reads 的比例推断所有样本（含对照）的性别（以 chrY 计数区判定，chrX 只作参考） |
 
 其它设置：

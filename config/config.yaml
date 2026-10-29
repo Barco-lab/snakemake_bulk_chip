@@ -121,9 +121,9 @@ qc:
   metagene_matrix: "computeMatrix scale-regions -b 3000 -a 3000 --regionBodyLength 5000 --unscaled5prime 1000 --binSize 50 --skipZeros"
   # 全基因组 bin 信号（multiBigwigSummary，bigwig 同 QC 图，排除 blacklist；只画主要染色体）
   #   沿染色体：每个 bin 的信号 / 该样本 bin 的中位数（log2），看大片段的拷贝数异常、性染色体、局部异常信号
-  #   累积分布：bin 按信号排序后的累计信号占比，看信号集中在少数区域还是接近均匀的背景
+  #   分布：bin 的 log2(信号) 的密度曲线，看背景主峰与富集 / 开放区域的右尾是否分得开、重复间是否一致
   genome_profile: true
-  genome_bin: 10000          # multiBigwigSummary 的 bin 宽（bp），累积分布用这个宽度
+  genome_bin: 10000          # multiBigwigSummary 的 bin 宽（bp），分布图用这个宽度
   genome_track_bin: 1000000  # 沿染色体的图把 bin 合并到这个宽度（bp）
 
 # 重复一致性（QC 报告「重复一致性」一节），只比较 IP 样本（被用作 control 的样本不参与）
