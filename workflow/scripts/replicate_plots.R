@@ -86,6 +86,8 @@ if ("correlation_scatter" %in% figures) {
   lo <- floor(min(cor) * 100) / 100
   rt$dark <- on_seq_dark(rt$r, lo, 1)
   dg <- data.frame(row = ss, col = ss, label = sub("_(rep[0-9]+)$", "\n\\1", ss, ignore.case = TRUE))  # 末尾的 _repN 换行
+  # 对角样本名：每格约 0.55 in，7 pt 约放得下 10 个字符；名字更长时按比例缩小字号
+  diag_pt <- min(7, 7 * 10 / max(nchar(unlist(strsplit(dg$label, "\n")))))
   lv <- function(d) transform(d, row = factor(row, levels = ss), col = factor(col, levels = ss))
   pts <- lv(pts); rt <- lv(rt); dg <- lv(dg)
   mid <- mean(lim)
@@ -99,7 +101,7 @@ if ("correlation_scatter" %in% figures) {
                 linewidth = 0.2, linetype = "dashed") +  # 只画在下三角
     scattermore::geom_scattermore(data = pts, aes(x, y), pointsize = 1.2, alpha = 0.15, colour = "black",
                                   pixels = c(256, 256)) +
-    geom_text(data = dg, aes(label = label), x = mid, y = mid, size = 7 / .pt, family = font, lineheight = 0.9,
+    geom_text(data = dg, aes(label = label), x = mid, y = mid, size = diag_pt / .pt, family = font, lineheight = 0.9,
               colour = "black") +
     scale_fill_seq(limits = c(lo, 1), name = paste(method, "r")) +
     facet_grid(row ~ col) +
